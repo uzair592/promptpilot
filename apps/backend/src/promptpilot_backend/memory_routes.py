@@ -18,4 +18,4 @@ def list_memory(
     project_id: UUID, user: User = Depends(current_user), db: Session = Depends(get_db)
 ) -> list[ProjectMemoryResponse]:
     require_project_access(db, project_id, user.id, ProjectRole.MEMBER)
-    return ProjectMemoryService().active(db, project_id)
+    return [ProjectMemoryResponse.model_validate(item) for item in ProjectMemoryService().active(db, project_id)]
