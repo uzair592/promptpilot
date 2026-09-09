@@ -208,6 +208,11 @@ class PromptAnalysisResponse(BaseModel):
     overall_score: int
     status: str
     analysis_version: str
+    analysis_mode: str
+    ai_provider: str | None
+    ai_model: str | None
+    ai_succeeded: bool
+    fallback_used: bool
     created_at: datetime
     dimensions: list[AnalysisDimensionResponse]
     gaps: list[InformationGapResponse]

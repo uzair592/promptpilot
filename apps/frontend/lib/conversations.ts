@@ -22,6 +22,8 @@ export type PromptAnalysis = {
   status: "Poor" | "Medium" | "Good";
   task_category: string;
   analysis_version: string;
+  analysis_mode: string;
+  fallback_used: boolean;
   dimensions: Array<{
     key: string;
     score: number | null;

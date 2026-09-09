@@ -150,6 +150,11 @@ export function ConversationWorkspace({
                           Prompt quality: {analysis[message.id].overall_score}
                           /100 ({analysis[message.id].status})
                         </strong>
+                        <small>
+                          {analysis[message.id].fallback_used
+                            ? "Baseline analysis"
+                            : "AI-assisted analysis"}
+                        </small>
                         {analysis[message.id].dimensions
                           .filter((item) => item.applicable)
                           .map((item) => (

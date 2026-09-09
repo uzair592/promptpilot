@@ -43,6 +43,8 @@ ignore = ["B008"]
 "src/promptpilot_backend/analyzer_service.py" = ["E501"]
 "src/promptpilot_backend/analysis_routes.py" = ["E501"]
 "src/promptpilot_backend/models.py" = ["E501"]
+"src/promptpilot_backend/analyzer_v2.py" = ["E501"]
+"src/promptpilot_backend/llm_provider.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

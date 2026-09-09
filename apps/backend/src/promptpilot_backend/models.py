@@ -149,6 +149,11 @@ class PromptAnalysis(Base):
     overall_score: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     analysis_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    analysis_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="baseline")
+    ai_provider: Mapped[str | None] = mapped_column(String(80))
+    ai_model: Mapped[str | None] = mapped_column(String(160))
+    ai_succeeded: Mapped[bool] = mapped_column(nullable=False, default=False)
+    fallback_used: Mapped[bool] = mapped_column(nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     dimensions: Mapped[list["PromptAnalysisDimension"]] = relationship(
         back_populates="analysis", cascade="all, delete-orphan"

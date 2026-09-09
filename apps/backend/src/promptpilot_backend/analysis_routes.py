@@ -1,10 +1,10 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .analyzer_service import analyze_message
+from .analyzer_v2 import analyze_hybrid
 from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
@@ -25,6 +25,7 @@ def create_analysis(
     message_id: UUID,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
+    mode: str = Query(default="hybrid"),
 ) -> PromptAnalysisResponse:
     conversation, project, _ = conversation_access(db, conversation_id, user, ProjectRole.MEMBER)
     message = db.scalar(
@@ -35,5 +36,5 @@ def create_analysis(
     if message.role != "user":
         raise HTTPException(status_code=422, detail="Only user messages can be analyzed")
     return PromptAnalysisResponse.model_validate(
-        analyze_message(db, project.id, conversation.id, message)
+        analyze_hybrid(db, project.id, conversation.id, message, mode)
     )

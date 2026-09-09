@@ -13,6 +13,10 @@ class Settings:
         for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
         if origin.strip()
     ]
+    llm_provider: str = os.getenv("LLM_PROVIDER", "")
+    llm_base_url: str = os.getenv("LLM_BASE_URL", "")
+    llm_model: str = os.getenv("LLM_MODEL", "")
+    llm_api_key: str = os.getenv("LLM_API_KEY", "")
 
 
 @lru_cache

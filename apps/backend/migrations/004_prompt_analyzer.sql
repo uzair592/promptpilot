@@ -7,6 +7,11 @@ CREATE TABLE IF NOT EXISTS prompt_analyses (
     overall_score integer NOT NULL CHECK (overall_score BETWEEN 0 AND 100),
     status varchar(20) NOT NULL CHECK (status IN ('Poor', 'Medium', 'Good')),
     analysis_version varchar(40) NOT NULL,
+    analysis_mode varchar(20) NOT NULL DEFAULT 'baseline',
+    ai_provider varchar(80),
+    ai_model varchar(160),
+    ai_succeeded boolean NOT NULL DEFAULT false,
+    fallback_used boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_prompt_analyses_message_created ON prompt_analyses (message_id, created_at DESC);
