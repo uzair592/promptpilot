@@ -4,13 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type User = { display_name: string; email: string };
+const apiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export default function DashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
-    fetch("http://localhost:8000/api/v1/auth/me", { credentials: "include" })
+    fetch(`${apiBaseUrl}/api/v1/auth/me`, { credentials: "include" })
       .then(async (response) => {
         if (!response.ok) {
           router.replace("/login");
@@ -23,7 +25,7 @@ export default function DashboardPage() {
       .catch(() => router.replace("/login"));
   }, [router]);
   async function logout() {
-    await fetch("http://localhost:8000/api/v1/auth/logout", {
+    await fetch(`${apiBaseUrl}/api/v1/auth/logout`, {
       method: "POST",
       credentials: "include",
     });
