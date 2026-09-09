@@ -52,10 +52,10 @@ def status_for(score: int) -> str:
 
 
 def analyze_message(
-    db: Session, project_id: UUID, conversation_id: UUID, message: Message
+    db: Session, project_id: UUID, conversation_id: UUID, message: Message, context: str = ""
 ) -> PromptAnalysis:
     text = message.content.strip()
-    lowered = text.lower()
+    lowered = f"{text} {context}".lower()
     category = classify_task(text)
     has_objective = any(
         token in lowered

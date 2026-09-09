@@ -4,8 +4,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .analyzer_service import analyze_message
+from .config import get_settings
+from .llm_provider import OpenAICompatibleProvider, ProviderUnavailable
+from .memory_service import ProjectMemoryService
 from .models import Answer, InformationGap, Message, PromptAnalysis, Question, QuestionSession
-from .question_generator import DeterministicQuestionGenerator
+from .question_generator import DeterministicQuestionGenerator, ProviderQuestionGenerator
 
 SEVERITY_WEIGHT = {"critical": 300, "important": 200, "optional": 100}
 
@@ -34,6 +37,21 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
     generated = DeterministicQuestionGenerator().generate(
         gap.question_target, str(gap.id), priority
     )
+    source = "fallback"
+    settings = get_settings()
+    if (
+        settings.llm_provider
+        and settings.llm_base_url
+        and settings.llm_model
+        and settings.llm_api_key
+    ):
+        try:
+            generated = ProviderQuestionGenerator(OpenAICompatibleProvider()).generate(
+                gap.question_target, str(gap.id), priority
+            )
+            source = "ai"
+        except (ProviderUnavailable, ValueError):
+            pass
     question = Question(
         session_id=session.id,
         gap_id=gap.id,
@@ -41,7 +59,7 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
         question_type=generated.question_type,
         priority=generated.priority,
         status="presented",
-        source="fallback",
+        source=source,
     )
     db.add(question)
     db.commit()
@@ -66,23 +84,11 @@ def reanalyze_after_answer(db: Session, session: QuestionSession, answer: Answer
     original = db.get(Message, previous.message_id)
     if original is None:
         raise ValueError("Question source message is missing")
-    answers = list(
-        db.scalars(
-            select(Answer)
-            .join(Question)
-            .where(Question.session_id == session.id)
-            .order_by(Answer.created_at)
-        ).all()
+    memory = ProjectMemoryService().active(db, previous.project_id)
+    context = "\n".join(f"{item.subject}: {item.content}" for item in memory)
+    analysis = analyze_message(
+        db, previous.project_id, previous.conversation_id, original, context=context
     )
-    enriched = Message(
-        id=original.id,
-        conversation_id=original.conversation_id,
-        role=original.role,
-        content=original.content
-        + "\n\nUser-provided task information:\n"
-        + "\n".join(item.content for item in answers),
-    )
-    analysis = analyze_message(db, previous.project_id, previous.conversation_id, enriched)
     session.latest_analysis_id = analysis.id
     answered_question = db.get(Question, answer.question_id)
     old_gap = db.get(InformationGap, answered_question.gap_id) if answered_question else None

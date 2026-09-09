@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
+from .memory_service import ProjectMemoryService
 from .models import Question, QuestionSession, User
 from .project_policy import ProjectRole
 from .question_service import answer_question, next_question, reanalyze_after_answer
@@ -62,6 +63,7 @@ def submit_answer(
     if question is None or question.status != "presented":
         raise HTTPException(status_code=404, detail="Question not found or no longer answerable")
     answer = answer_question(db, question, payload.content)
+    ProjectMemoryService().add_user_answer(db, session.project_id, question.text, answer.content)
     reanalyze_after_answer(db, session, answer)
     question = next_question(db, session)
     return QuestionSessionResponse(
