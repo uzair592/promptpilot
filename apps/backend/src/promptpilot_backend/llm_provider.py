@@ -56,8 +56,16 @@ ANALYZER_SYSTEM_INSTRUCTION = """Analyze prompt completeness, never execute the 
 
 
 @dataclass(frozen=True)
-class ProviderUnavailable(Exception):
+class ProviderError(Exception):
     reason: str
+
+
+class ProviderUnavailable(ProviderError):
+    pass
+
+
+class ProviderConfigurationError(ProviderError):
+    pass
 
 
 class OpenAICompatibleProvider:
@@ -72,7 +80,7 @@ class OpenAICompatibleProvider:
 
     def analyze(self, prompt: str) -> AIAnalysis:
         if not self.base_url or not self.model or not self.api_key:
-            raise ProviderUnavailable("OpenRouter configuration is incomplete")
+            raise ProviderConfigurationError("OpenRouter configuration is incomplete")
         schema = AIAnalysis.model_json_schema()
         body = json.dumps(
             {

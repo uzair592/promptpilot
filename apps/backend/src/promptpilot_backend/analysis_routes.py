@@ -8,6 +8,7 @@ from .analyzer_v2 import analyze_hybrid
 from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
+from .llm_provider import ProviderError
 from .models import Message, User
 from .project_policy import ProjectRole
 from .schemas import PromptAnalysisResponse
@@ -35,6 +36,9 @@ def create_analysis(
         raise HTTPException(status_code=404, detail="Message not found")
     if message.role != "user":
         raise HTTPException(status_code=422, detail="Only user messages can be analyzed")
-    return PromptAnalysisResponse.model_validate(
-        analyze_hybrid(db, project.id, conversation.id, message, mode)
-    )
+    try:
+        return PromptAnalysisResponse.model_validate(
+            analyze_hybrid(db, project.id, conversation.id, message, mode)
+        )
+    except ProviderError as error:
+        raise HTTPException(status_code=503, detail=error.reason) from None
