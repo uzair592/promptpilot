@@ -216,3 +216,23 @@ class PromptAnalysisResponse(BaseModel):
     created_at: datetime
     dimensions: list[AnalysisDimensionResponse]
     gaps: list[InformationGapResponse]
+
+
+class QuestionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    text: str
+    question_type: str
+    priority: int
+    status: str
+
+
+class AnswerCreateRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=10000)
+
+
+class QuestionSessionResponse(BaseModel):
+    id: UUID
+    status: str
+    stop_reason: str | None
+    next_question: QuestionResponse | None

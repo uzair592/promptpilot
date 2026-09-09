@@ -9,7 +9,7 @@ from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
 from .llm_provider import ProviderError
-from .models import Message, User
+from .models import Message, QuestionSession, User
 from .project_policy import ProjectRole
 from .schemas import PromptAnalysisResponse
 
@@ -37,8 +37,13 @@ def create_analysis(
     if message.role != "user":
         raise HTTPException(status_code=422, detail="Only user messages can be analyzed")
     try:
-        return PromptAnalysisResponse.model_validate(
-            analyze_hybrid(db, project.id, conversation.id, message, mode)
+        analysis = analyze_hybrid(db, project.id, conversation.id, message, mode)
+        db.add(
+            QuestionSession(
+                project_id=project.id, conversation_id=conversation.id, analysis_id=analysis.id
+            )
         )
+        db.commit()
+        return PromptAnalysisResponse.model_validate(analysis)
     except ProviderError as error:
         raise HTTPException(status_code=503, detail=error.reason) from None

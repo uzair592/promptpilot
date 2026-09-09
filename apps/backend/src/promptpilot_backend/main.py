@@ -10,6 +10,7 @@ from .conversation_routes import project_router as conversation_project_router
 from .db import Base, engine
 from .errors import error_response
 from .project_routes import router as project_router
+from .question_routes import router as question_router
 from .routes import router
 
 app = FastAPI(title="PromptPilot API", version="0.1.0")
@@ -45,3 +46,4 @@ app.include_router(project_router)
 app.include_router(conversation_project_router)
 app.include_router(conversation_router)
 app.include_router(analysis_router)
+app.include_router(question_router)

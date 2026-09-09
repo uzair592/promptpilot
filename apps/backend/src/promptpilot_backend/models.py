@@ -194,3 +194,59 @@ class InformationGap(Base):
     question_target: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="unresolved")
     analysis: Mapped[PromptAnalysis] = relationship(back_populates="gaps")
+
+
+class QuestionSession(Base):
+    __tablename__ = "question_sessions"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    analysis_id: Mapped[UUID] = mapped_column(
+        ForeignKey("prompt_analyses.id", ondelete="CASCADE"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    stop_reason: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+    questions: Mapped[list["Question"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+
+
+class Question(Base):
+    __tablename__ = "questions"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    session_id: Mapped[UUID] = mapped_column(
+        ForeignKey("question_sessions.id", ondelete="CASCADE"), index=True
+    )
+    gap_id: Mapped[UUID] = mapped_column(
+        ForeignKey("information_gaps.id", ondelete="CASCADE"), index=True
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    question_type: Mapped[str] = mapped_column(String(20), nullable=False, default="free_text")
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="generated")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    session: Mapped[QuestionSession] = relationship(back_populates="questions")
+    answers: Mapped[list["Answer"]] = relationship(
+        back_populates="question", cascade="all, delete-orphan"
+    )
+
+
+class Answer(Base):
+    __tablename__ = "answers"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    question_id: Mapped[UUID] = mapped_column(
+        ForeignKey("questions.id", ondelete="CASCADE"), index=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False, default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    question: Mapped[Question] = relationship(back_populates="answers")
