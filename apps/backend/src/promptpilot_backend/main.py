@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from .config import get_settings
 from .db import Base, engine
 from .errors import error_response
+from .project_routes import router as project_router
 from .routes import router
 
 app = FastAPI(title="PromptPilot API", version="0.1.0")
@@ -37,3 +38,4 @@ def validation_error(request: Request, _: RequestValidationError) -> JSONRespons
 
 
 app.include_router(router)
+app.include_router(project_router)

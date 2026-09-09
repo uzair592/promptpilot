@@ -10,6 +10,7 @@ Authentication endpoints return `{ "user": { "id", "email", "display_name", "sta
 | `GET /projects`                                   | session        | cursor, limit?                             | paged project DTOs          | 200, 401               |
 | `GET /projects/{projectId}`                       | session/member | none                                       | project summary             | 200, 401, 403, 404     |
 | `PATCH /projects/{projectId}`                     | owner/editor   | name, description?, domain?                | project DTO                 | 200, 400, 403, 404     |
+| `POST /projects/{projectId}/archive`              | owner          | none                                       | archived project DTO        | 200, 403, 404, 409     |
 | `POST /projects/{projectId}/conversations`        | member         | title?                                     | conversation DTO            | 201, 400, 403          |
 | `POST /projects/{projectId}/messages`             | member         | conversation_id, content                   | message + analysis state    | 201, 400, 403, 413     |
 | `POST /projects/{projectId}/analyses`             | member         | source_message_id                          | analysis DTO                | 202/200, 400, 403, 502 |
@@ -27,3 +28,5 @@ Authentication endpoints return `{ "user": { "id", "email", "display_name", "sta
 | `GET /projects/{projectId}/tasks`                 | member         | filters                                    | task DTOs                   | 200, 403               |
 
 Validation includes max lengths, enum values, authorized project IDs, positive pagination limits, supported MIME/signature and upload size, approved version references, and non-empty response text. `401` means unauthenticated, `403` unauthorized, `404` not found or intentionally undisclosed, `409` version/state conflict, `413` too large, `415` unsupported media, `422` schema validation, `429` rate limit, `502/503` provider/service failure.
+
+Project detail intentionally returns `404 Project not found` for both a missing project and an inaccessible project, preventing object enumeration. Archived projects remain readable to active members but reject update/archive mutations.

@@ -8,7 +8,7 @@ PostgreSQL is the source of truth. All tables use `uuid` primary keys generated 
 | --------------------- | ----------------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- |
 | `users`               | `id`, email, display name, status, timestamps                           | unique normalized email                          | disabled users cannot authenticate           |
 | `projects`            | `id`, owner_id, name, description, domain, status                       | owner/status; FK owner                           | archive blocks normal mutation               |
-| `project_members`     | project_id, user_id, role, status                                       | unique project/user; member lookup               | every access uses membership                 |
+| `project_members`     | project_id, user_id, role, status, timestamps                           | unique project/user; project/user/status indexes | every access uses explicit membership        |
 | `conversations`       | project_id, title, status                                               | project/updated_at                               | project-scoped                               |
 | `messages`            | conversation_id, author_id, role, content, created_at                   | conversation/created_at                          | immutable audit-relevant event               |
 | `prompts`             | project_id, current_version_id, status                                  | project/status                                   | parent record; versions immutable            |
@@ -31,6 +31,10 @@ PostgreSQL is the source of truth. All tables use `uuid` primary keys generated 
 | `audit_events`        | actor, project_id, operation, target, correlation_id, safe metadata     | project/time, correlation/time                   | append-only, redacted                        |
 
 JSONB is appropriate for evolving analysis dimensions, structured prompt payloads, model capabilities, and normalized metadata, while query-critical ownership and status fields remain columns. Check constraints should limit enums/statuses and non-negative sizes/scores.
+
+## Implemented Subset
+
+Migration `002_projects_and_memberships.sql` currently creates only `projects` and `project_members` after the authentication migration. The owner is represented in both `projects.owner_id` and an `owner` membership row; application creation is transactional and the unique constraint prevents duplicate membership. Future tables remain uncreated until their vertical slices.
 
 ## pgvector
 
