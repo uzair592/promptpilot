@@ -52,3 +52,7 @@ Domain and application services use unit tests with fake ports. FastAPI routes u
 ## Change Rule
 
 A feature should arrive as a vertical slice: contract, domain/application behavior, adapter, persistence, API, UI, tests, and documentation. Architectural changes require an ADR.
+
+## Detailed Design
+
+See [system design](architecture/system-design.md), [database design](database/database-design.md), [API design](api/api-design.md), [AI pipeline](ai/ai-pipeline.md), [security architecture](architecture/security-architecture.md), and [test architecture](testing/test-architecture.md) for implementation-level contracts.
