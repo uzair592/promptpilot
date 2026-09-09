@@ -208,6 +208,9 @@ class QuestionSession(Base):
     analysis_id: Mapped[UUID] = mapped_column(
         ForeignKey("prompt_analyses.id", ondelete="CASCADE"), index=True
     )
+    latest_analysis_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("prompt_analyses.id", ondelete="SET NULL"), index=True
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     stop_reason: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -231,6 +234,8 @@ class Question(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     question_type: Mapped[str] = mapped_column(String(20), nullable=False, default="free_text")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="fallback")
+    options: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="generated")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

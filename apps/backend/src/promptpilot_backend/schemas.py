@@ -225,6 +225,8 @@ class QuestionResponse(BaseModel):
     question_type: str
     priority: int
     status: str
+    source: str
+    options: list[str] | None = None
 
 
 class AnswerCreateRequest(BaseModel):

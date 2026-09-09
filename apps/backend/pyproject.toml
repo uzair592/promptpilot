@@ -48,6 +48,7 @@ ignore = ["B008"]
 "tests/test_analyzer_v2.py" = ["E501"]
 "src/promptpilot_backend/question_routes.py" = ["E501"]
 "src/promptpilot_backend/question_service.py" = ["E501"]
+"src/promptpilot_backend/question_generator.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

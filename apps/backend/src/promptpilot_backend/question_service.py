@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Answer, InformationGap, Question, QuestionSession
+from .question_generator import DeterministicQuestionGenerator
 
 SEVERITY_WEIGHT = {"critical": 300, "important": 200, "optional": 100}
 
@@ -17,7 +18,7 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
         db.scalars(
             select(InformationGap).where(
                 InformationGap.analysis_id == session.analysis_id,
-                InformationGap.status == "unresolved",
+                InformationGap.status.in_(("unresolved", "partially_resolved")),
                 InformationGap.id.not_in(existing_gap_ids),
             )
         ).all()
@@ -28,13 +29,18 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
         db.commit()
         return None
     gap = max(gaps, key=lambda item: (SEVERITY_WEIGHT.get(item.severity, 0), item.importance))
+    priority = SEVERITY_WEIGHT.get(gap.severity, 0)
+    generated = DeterministicQuestionGenerator().generate(
+        gap.question_target, str(gap.id), priority
+    )
     question = Question(
         session_id=session.id,
         gap_id=gap.id,
-        text=gap.question_target,
-        question_type="free_text",
-        priority=SEVERITY_WEIGHT.get(gap.severity, 0),
+        text=generated.question_text,
+        question_type=generated.question_type,
+        priority=generated.priority,
         status="presented",
+        source="fallback",
     )
     db.add(question)
     db.commit()
@@ -49,7 +55,7 @@ def answer_question(db: Session, question: Question, content: str) -> Answer:
     question.answered_at = datetime.now(UTC)
     gap = db.get(InformationGap, question.gap_id)
     if gap:
-        gap.status = "resolved"
+        gap.status = "partially_resolved"
     db.commit()
     db.refresh(answer)
     return answer
