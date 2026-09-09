@@ -4,31 +4,32 @@ PostgreSQL is the source of truth. All tables use `uuid` primary keys generated 
 
 ## Core Tables
 
-| Table                 | Key columns and relationships                                           | Indexes/constraints                              | Lifecycle/security                           |
-| --------------------- | ----------------------------------------------------------------------- | ------------------------------------------------ | -------------------------------------------- |
-| `users`               | `id`, email, display name, status, timestamps                           | unique normalized email                          | disabled users cannot authenticate           |
-| `projects`            | `id`, owner_id, name, description, domain, status                       | owner/status; FK owner                           | archive blocks normal mutation               |
-| `project_members`     | project_id, user_id, role, status, timestamps                           | unique project/user; project/user/status indexes | every access uses explicit membership        |
-| `conversations`       | project_id, title, status                                               | project/updated_at                               | project-scoped                               |
-| `messages`            | conversation_id, author_id, role, content, created_at                   | conversation/created_at                          | immutable audit-relevant event               |
-| `prompts`             | project_id, current_version_id, status                                  | project/status                                   | parent record; versions immutable            |
-| `prompt_versions`     | prompt_id, version_no, structured payload, source refs                  | unique prompt/version_no                         | published versions immutable                 |
-| `prompt_analyses`     | project_id, source_message_id, score/status, JSON dimensions/gaps       | project/created_at                               | snapshot, not overwritten                    |
-| `questions`           | project_id, analysis_id, gap_key, priority, status                      | project/status/priority                          | scoped and user-controlled                   |
-| `answers`             | question_id, message_id, answer text, status                            | question/created_at                              | accepted answer creates provenance           |
-| `documents`           | project_id, storage_key, media type, size, checksum, status             | project/status; unique project/checksum optional | file access requires membership              |
-| `document_chunks`     | document_id, ordinal, text, locator, embedding                          | unique document/ordinal; vector index later      | derived data follows document access         |
-| `context_items`       | project_id, kind, trust_class, content, source refs, confidence, status | project/status/trust                             | provenance immutable across revisions        |
-| `requirements`        | project_id, stable_key, type, statement, priority, status, certainty    | unique project/stable_key                        | versioned revisions preserve key             |
-| `requirement_sources` | requirement_id, source_type, source_id, excerpt                         | source lookup                                    | no orphan source references                  |
-| `models`              | provider, model key, capabilities, cost/latency metadata, active        | unique provider/key                              | registry metadata is versioned               |
-| `model_runs`          | project_id, prompt_version_id, model_id, status, output ref, timestamps | project/status; prompt/time                      | secrets excluded; output access scoped       |
-| `evaluations`         | project_id, model_run_id, overall score, explanation                    | unique evaluation/run policy                     | immutable result snapshot                    |
-| `evaluation_items`    | evaluation_id, requirement_id, status, evidence, certainty              | unique evaluation/requirement                    | item points to stable requirement            |
-| `tasks`               | project_id, title, status, priority, assignee                           | project/status                                   | archive rules apply                          |
-| `generated_documents` | project_id, type, status, storage/content ref                           | project/type/status                              | published output references approved context |
-| `artifact_versions`   | project_id, artifact_type/id, version_no, hash, created_by              | unique artifact/version                          | append-only metadata                         |
-| `audit_events`        | actor, project_id, operation, target, correlation_id, safe metadata     | project/time, correlation/time                   | append-only, redacted                        |
+| Table                           | Key columns and relationships                                           | Indexes/constraints                                    | Lifecycle/security                           |
+| ------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------- |
+| `users`                         | `id`, email, display name, status, timestamps                           | unique normalized email                                | disabled users cannot authenticate           |
+| `projects`                      | `id`, owner_id, name, description, domain, status                       | owner/status; FK owner                                 | archive blocks normal mutation               |
+| `project_members`               | project_id, user_id, role, status, timestamps                           | unique project/user; project/user/status indexes       | every access uses explicit membership        |
+| `conversations`                 | project_id, title, status                                               | project/updated_at                                     | project-scoped                               |
+| `messages`                      | conversation_id, role, content, sequence, created_at                    | conversation/sequence; unique conversation/idempotency | immutable audit-relevant event               |
+| `conversation_message_counters` | conversation_id, last_sequence                                          | primary key conversation_id                            | row lock allocates conversation-scoped order |
+| `prompts`                       | project_id, current_version_id, status                                  | project/status                                         | parent record; versions immutable            |
+| `prompt_versions`               | prompt_id, version_no, structured payload, source refs                  | unique prompt/version_no                               | published versions immutable                 |
+| `prompt_analyses`               | project_id, source_message_id, score/status, JSON dimensions/gaps       | project/created_at                                     | snapshot, not overwritten                    |
+| `questions`                     | project_id, analysis_id, gap_key, priority, status                      | project/status/priority                                | scoped and user-controlled                   |
+| `answers`                       | question_id, message_id, answer text, status                            | question/created_at                                    | accepted answer creates provenance           |
+| `documents`                     | project_id, storage_key, media type, size, checksum, status             | project/status; unique project/checksum optional       | file access requires membership              |
+| `document_chunks`               | document_id, ordinal, text, locator, embedding                          | unique document/ordinal; vector index later            | derived data follows document access         |
+| `context_items`                 | project_id, kind, trust_class, content, source refs, confidence, status | project/status/trust                                   | provenance immutable across revisions        |
+| `requirements`                  | project_id, stable_key, type, statement, priority, status, certainty    | unique project/stable_key                              | versioned revisions preserve key             |
+| `requirement_sources`           | requirement_id, source_type, source_id, excerpt                         | source lookup                                          | no orphan source references                  |
+| `models`                        | provider, model key, capabilities, cost/latency metadata, active        | unique provider/key                                    | registry metadata is versioned               |
+| `model_runs`                    | project_id, prompt_version_id, model_id, status, output ref, timestamps | project/status; prompt/time                            | secrets excluded; output access scoped       |
+| `evaluations`                   | project_id, model_run_id, overall score, explanation                    | unique evaluation/run policy                           | immutable result snapshot                    |
+| `evaluation_items`              | evaluation_id, requirement_id, status, evidence, certainty              | unique evaluation/requirement                          | item points to stable requirement            |
+| `tasks`                         | project_id, title, status, priority, assignee                           | project/status                                         | archive rules apply                          |
+| `generated_documents`           | project_id, type, status, storage/content ref                           | project/type/status                                    | published output references approved context |
+| `artifact_versions`             | project_id, artifact_type/id, version_no, hash, created_by              | unique artifact/version                                | append-only metadata                         |
+| `audit_events`                  | actor, project_id, operation, target, correlation_id, safe metadata     | project/time, correlation/time                         | append-only, redacted                        |
 
 JSONB is appropriate for evolving analysis dimensions, structured prompt payloads, model capabilities, and normalized metadata, while query-critical ownership and status fields remain columns. Check constraints should limit enums/statuses and non-negative sizes/scores.
 

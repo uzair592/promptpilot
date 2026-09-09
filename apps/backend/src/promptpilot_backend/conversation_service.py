@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import Conversation, Message, Project
+from .models import Conversation, ConversationMessageCounter, Message, Project
 from .schemas import ConversationCreateRequest, ConversationUpdateRequest, MessageCreateRequest
 
 
@@ -17,6 +17,8 @@ def create_conversation(
         status="active",
     )
     db.add(conversation)
+    db.flush()
+    db.add(ConversationMessageCounter(conversation_id=conversation.id, last_sequence=0))
     db.commit()
     db.refresh(conversation)
     return conversation
@@ -28,7 +30,14 @@ def list_conversations(
     query = select(Conversation).where(Conversation.project_id == project_id).order_by(
         Conversation.updated_at.desc(), Conversation.id.desc()
     )
-    total = len(db.scalars(query).all())
+    total = (
+        db.scalar(
+            select(func.count())
+            .select_from(Conversation)
+            .where(Conversation.project_id == project_id)
+        )
+        or 0
+    )
     return list(db.scalars(query.offset(offset).limit(limit)).all()), total
 
 
@@ -61,17 +70,25 @@ def add_message(
         )
         if existing:
             return existing
-    current_sequence = db.scalar(
-        select(func.max(Message.sequence)).where(Message.conversation_id == conversation.id)
-    ) or 0
+    counter = db.scalar(
+        select(ConversationMessageCounter)
+        .where(ConversationMessageCounter.conversation_id == conversation.id)
+        .with_for_update()
+    )
+    if counter is None:
+        counter = ConversationMessageCounter(conversation_id=conversation.id, last_sequence=0)
+        db.add(counter)
+        db.flush()
+    counter.last_sequence += 1
     message = Message(
         conversation_id=conversation.id,
         role=payload.role,
         content=payload.content.strip(),
-        sequence=current_sequence + 1,
+        sequence=counter.last_sequence,
         idempotency_key=idempotency_key,
     )
     db.add(message)
+    conversation.updated_at = func.now()
     try:
         db.commit()
     except IntegrityError:
@@ -96,5 +113,12 @@ def list_messages(
     query = select(Message).where(Message.conversation_id == conversation_id).order_by(
         Message.sequence.asc()
     )
-    total = len(db.scalars(query).all())
+    total = (
+        db.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.conversation_id == conversation_id)
+        )
+        or 0
+    )
     return list(db.scalars(query.offset(offset).limit(limit)).all()), total

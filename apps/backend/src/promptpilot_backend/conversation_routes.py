@@ -36,12 +36,15 @@ conversation_router = APIRouter(
 )
 
 
+MAX_OFFSET = 1_000_000
+
+
 def decode_cursor(cursor: str | None) -> int:
     if not cursor:
         return 0
     try:
         value = int(urlsafe_b64decode(cursor.encode()).decode())
-        if value < 0:
+        if value < 0 or value > MAX_OFFSET:
             raise ValueError
         return value
     except (ValueError, UnicodeDecodeError):
@@ -49,6 +52,8 @@ def decode_cursor(cursor: str | None) -> int:
 
 
 def encode_cursor(offset: int) -> str:
+    if offset < 0 or offset > MAX_OFFSET:
+        raise ValueError("Pagination offset is out of bounds")
     return urlsafe_b64encode(str(offset).encode()).decode()
 
 

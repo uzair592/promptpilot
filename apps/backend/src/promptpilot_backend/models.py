@@ -102,6 +102,15 @@ class Conversation(Base):
     )
 
 
+class ConversationMessageCounter(Base):
+    __tablename__ = "conversation_message_counters"
+
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True
+    )
+    last_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (

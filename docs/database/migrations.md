@@ -16,3 +16,4 @@ Use a single ordered migration history owned by the backend. Each migration is f
 The currently implemented migration sequence is `001_users_and_sessions.sql`, `002_projects_and_memberships.sql`, and `003_conversations_and_messages.sql`. The third migration creates only conversations and messages. Message ordering uses a unique per-conversation integer sequence and optional per-conversation idempotency key.
 
 Use expand-and-contract for incompatible changes. Backfill scripts must be idempotent and separately observable. Destructive cleanup requires a documented retention decision and backup/recovery verification.
+Migration `003_conversations_and_messages.sql` also creates `conversation_message_counters` and backfills each counter from existing message sequences. Message inserts lock the counter row, preserving unique deterministic ordering under concurrent PostgreSQL transactions.

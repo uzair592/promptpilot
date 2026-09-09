@@ -27,3 +27,16 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS ix_messages_conversation_sequence
     ON messages (conversation_id, sequence ASC);
+
+CREATE TABLE IF NOT EXISTS conversation_message_counters (
+    conversation_id uuid PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+    last_sequence integer NOT NULL DEFAULT 0 CHECK (last_sequence >= 0)
+);
+
+INSERT INTO conversation_message_counters (conversation_id, last_sequence)
+SELECT c.id, COALESCE(MAX(m.sequence), 0)
+FROM conversations c
+LEFT JOIN messages m ON m.conversation_id = c.id
+GROUP BY c.id
+ON CONFLICT (conversation_id) DO UPDATE
+SET last_sequence = GREATEST(conversation_message_counters.last_sequence, EXCLUDED.last_sequence);
