@@ -3,7 +3,8 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Answer, InformationGap, Question, QuestionSession
+from .analyzer_service import analyze_message
+from .models import Answer, InformationGap, Message, PromptAnalysis, Question, QuestionSession
 from .question_generator import DeterministicQuestionGenerator
 
 SEVERITY_WEIGHT = {"critical": 300, "important": 200, "optional": 100}
@@ -17,7 +18,7 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
     gaps = list(
         db.scalars(
             select(InformationGap).where(
-                InformationGap.analysis_id == session.analysis_id,
+                InformationGap.analysis_id == (session.latest_analysis_id or session.analysis_id),
                 InformationGap.status.in_(("unresolved", "partially_resolved")),
                 InformationGap.id.not_in(existing_gap_ids),
             )
@@ -53,9 +54,39 @@ def answer_question(db: Session, question: Question, content: str) -> Answer:
     db.add(answer)
     question.status = "answered"
     question.answered_at = datetime.now(UTC)
-    gap = db.get(InformationGap, question.gap_id)
-    if gap:
-        gap.status = "partially_resolved"
     db.commit()
     db.refresh(answer)
     return answer
+
+
+def reanalyze_after_answer(db: Session, session: QuestionSession, answer: Answer) -> PromptAnalysis:
+    previous = db.get(PromptAnalysis, session.latest_analysis_id or session.analysis_id)
+    if previous is None:
+        raise ValueError("Question session analysis is missing")
+    original = db.get(Message, previous.message_id)
+    if original is None:
+        raise ValueError("Question source message is missing")
+    answers = list(
+        db.scalars(
+            select(Answer)
+            .join(Question)
+            .where(Question.session_id == session.id)
+            .order_by(Answer.created_at)
+        ).all()
+    )
+    enriched = Message(
+        id=original.id,
+        conversation_id=original.conversation_id,
+        role=original.role,
+        content=original.content
+        + "\n\nUser-provided task information:\n"
+        + "\n".join(item.content for item in answers),
+    )
+    analysis = analyze_message(db, previous.project_id, previous.conversation_id, enriched)
+    session.latest_analysis_id = analysis.id
+    answered_question = db.get(Question, answer.question_id)
+    old_gap = db.get(InformationGap, answered_question.gap_id) if answered_question else None
+    if old_gap:
+        old_gap.status = "partially_resolved"
+    db.commit()
+    return analysis

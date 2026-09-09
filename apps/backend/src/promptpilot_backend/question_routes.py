@@ -9,7 +9,7 @@ from .db import get_db
 from .dependencies import current_user
 from .models import Question, QuestionSession, User
 from .project_policy import ProjectRole
-from .question_service import answer_question, next_question
+from .question_service import answer_question, next_question, reanalyze_after_answer
 from .schemas import AnswerCreateRequest, QuestionResponse, QuestionSessionResponse
 
 router = APIRouter(prefix="/api/v1/conversations/{conversation_id}", tags=["questions"])
@@ -61,7 +61,8 @@ def submit_answer(
     )
     if question is None or question.status != "presented":
         raise HTTPException(status_code=404, detail="Question not found or no longer answerable")
-    answer_question(db, question, payload.content)
+    answer = answer_question(db, question, payload.content)
+    reanalyze_after_answer(db, session, answer)
     question = next_question(db, session)
     return QuestionSessionResponse(
         id=session.id,
