@@ -1,15 +1,5 @@
 # Prompt Analyzer
 
-## Inputs
+Prompt Analyzer v1 is a deterministic, provider-independent analysis service. It classifies a user message, scores task-aware dimensions, and records explainable information gaps. It does not use word count as the quality score and does not invent facts. Historical results are immutable records identified by `prompt-analyzer-v1`.
 
-Original request, relevant conversation state, project metadata, available context, and task/domain hints.
-
-## Assessment
-
-Assess intent clarity, objective, task type, audience, required output, context, constraints, requirements, format, success criteria, dependencies, references, ambiguity, and critical missing information. Dimensions are task-aware; irrelevant dimensions may be marked not applicable.
-
-## Output
-
-Return a numerical score, `Poor`/`Medium`/`Good` status, dimension scores, explanation, prioritized gaps, severity, confidence, analyzer version, and provenance references.
-
-The score is an engineering heuristic and AI-assisted metric. It must be validated experimentally against human review and downstream response quality; it is not a truth claim and is not based on prompt length.
+The current implementation is synchronous and intentionally leaves provider adapters, document context, and the Dynamic Question Engine for later slices.

@@ -16,6 +16,27 @@ export type Message = {
   sequence: number;
   created_at: string;
 };
+export type PromptAnalysis = {
+  id: string;
+  overall_score: number;
+  status: "Poor" | "Medium" | "Good";
+  task_category: string;
+  analysis_version: string;
+  dimensions: Array<{
+    key: string;
+    score: number | null;
+    status: string;
+    applicable: boolean;
+    explanation: string;
+  }>;
+  gaps: Array<{
+    id: string;
+    title: string;
+    description: string;
+    severity: string;
+    question_target: string;
+  }>;
+};
 
 export async function getConversations(
   projectId: string,
@@ -71,5 +92,20 @@ export async function sendMessage(
     },
   );
   if (!response.ok) throw new Error("Could not send message");
+  return response.json();
+}
+
+export async function analyzeMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<PromptAnalysis> {
+  const response = await fetch(
+    `${apiBaseUrl}/api/v1/conversations/${conversationId}/messages/${messageId}/analysis`,
+    {
+      method: "POST",
+      credentials: "include",
+    },
+  );
+  if (!response.ok) throw new Error("Could not analyze message");
   return response.json();
 }

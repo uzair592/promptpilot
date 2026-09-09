@@ -9,6 +9,8 @@ import {
   getMessages,
   Message,
   sendMessage,
+  analyzeMessage,
+  PromptAnalysis,
 } from "../../../lib/conversations";
 
 export function ConversationWorkspace({
@@ -25,6 +27,8 @@ export function ConversationWorkspace({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState("");
+  const [analysis, setAnalysis] = useState<Record<string, PromptAnalysis>>({});
+  const [analyzing, setAnalyzing] = useState<string | null>(null);
   useEffect(() => {
     getConversations(projectId)
       .then((items) => {
@@ -74,6 +78,18 @@ export function ConversationWorkspace({
       setSending(false);
     }
   }
+  async function analyze(message: Message) {
+    setAnalyzing(message.id);
+    setError("");
+    try {
+      const result = await analyzeMessage(message.conversation_id, message.id);
+      setAnalysis((items) => ({ ...items, [message.id]: result }));
+    } catch {
+      setError("Analysis could not be completed. Please try again.");
+    } finally {
+      setAnalyzing(null);
+    }
+  }
   if (loading) return <p className="muted">Loading conversations...</p>;
   return (
     <div className="conversation-shell">
@@ -117,6 +133,43 @@ export function ConversationWorkspace({
                   >
                     <small>{message.role}</small>
                     <p>{message.content}</p>
+                    {message.role === "user" && (
+                      <button
+                        type="button"
+                        onClick={() => analyze(message)}
+                        disabled={analyzing === message.id}
+                      >
+                        {analyzing === message.id
+                          ? "Analyzing..."
+                          : "Analyze prompt"}
+                      </button>
+                    )}
+                    {analysis[message.id] && (
+                      <div className="prompt-meter">
+                        <strong>
+                          Prompt quality: {analysis[message.id].overall_score}
+                          /100 ({analysis[message.id].status})
+                        </strong>
+                        {analysis[message.id].dimensions
+                          .filter((item) => item.applicable)
+                          .map((item) => (
+                            <p key={item.key}>
+                              <b>{item.key.replaceAll("_", " ")}</b>:{" "}
+                              {item.score}/100 - {item.explanation}
+                            </p>
+                          ))}
+                        {analysis[message.id].gaps.length > 0 && (
+                          <>
+                            <b>Information gaps</b>
+                            {analysis[message.id].gaps.map((gap) => (
+                              <p key={gap.id}>
+                                {gap.severity}: {gap.title} - {gap.description}
+                              </p>
+                            ))}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </article>
                 ))
               )}

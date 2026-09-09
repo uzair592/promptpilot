@@ -17,3 +17,5 @@ The currently implemented migration sequence is `001_users_and_sessions.sql`, `0
 
 Use expand-and-contract for incompatible changes. Backfill scripts must be idempotent and separately observable. Destructive cleanup requires a documented retention decision and backup/recovery verification.
 Migration `003_conversations_and_messages.sql` also creates `conversation_message_counters` and backfills each counter from existing message sequences. Message inserts lock the counter row, preserving unique deterministic ordering under concurrent PostgreSQL transactions.
+
+Migration `004_prompt_analyzer.sql` creates historical prompt analysis, dimension, and information-gap tables. Analyses are append-only records and reference the authorized project, conversation, and source message.

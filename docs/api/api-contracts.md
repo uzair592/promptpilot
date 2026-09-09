@@ -38,3 +38,7 @@ Conversation and message endpoints require project membership. Owners/editors ma
 Validation includes max lengths, enum values, authorized project IDs, positive pagination limits, supported MIME/signature and upload size, approved version references, and non-empty response text. `401` means unauthenticated, `403` unauthorized, `404` not found or intentionally undisclosed, `409` version/state conflict, `413` too large, `415` unsupported media, `422` schema validation, `429` rate limit, `502/503` provider/service failure.
 
 Project detail intentionally returns `404 Project not found` for both a missing project and an inaccessible project, preventing object enumeration. Archived projects remain readable to active members but reject update/archive mutations.
+
+## Prompt analysis
+
+`POST /api/v1/conversations/{conversation_id}/messages/{message_id}/analysis` analyzes an authorized user message and returns a typed `PromptAnalysisResponse`. Only user-role messages are accepted. Results include the overall score/status, task category, versioned dimensions, and critical/important/optional information gaps.
