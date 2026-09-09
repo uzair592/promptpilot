@@ -2,6 +2,8 @@
 
 All paths use `/api/v1`; `{projectId}` must be authorized. Request and response examples are logical schemas; implementation may use a typed Python schema and generated OpenAPI without exposing persistence details.
 
+Authentication endpoints return `{ "user": { "id", "email", "display_name", "status", "created_at", "last_login_at" } }` and set an HTTP-only session cookie. `POST /auth/logout` returns `204`. `GET /auth/me` requires the session cookie. Registration requires a valid email, non-blank display name, and password of at least 12 characters.
+
 | Method/path                                       | Auth           | Request                                    | Response                    | Statuses               |
 | ------------------------------------------------- | -------------- | ------------------------------------------ | --------------------------- | ---------------------- |
 | `POST /projects`                                  | session        | name, description?, domain?                | project DTO                 | 201, 400, 401          |

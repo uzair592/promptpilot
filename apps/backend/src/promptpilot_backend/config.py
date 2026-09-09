@@ -1,0 +1,15 @@
+import os
+from functools import lru_cache
+
+
+class Settings:
+    app_env: str = os.getenv("APP_ENV", "development")
+    database_url: str = os.getenv("DATABASE_URL", "sqlite:///./promptpilot.db")
+    session_cookie_name: str = os.getenv("SESSION_COOKIE_NAME", "promptpilot_session")
+    session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", "604800"))
+    secure_cookies: bool = os.getenv("APP_ENV", "development") == "production"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

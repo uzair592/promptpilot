@@ -14,3 +14,4 @@ The detailed records are in `docs/adr/`. The current decisions are:
 - ADR-0010: Use versioned REST contracts for the frontend boundary.
 - ADR-0011: Make published artifact versions immutable.
 - ADR-0012: Hide file storage behind a local-first abstraction.
+- ADR-0013: Use Argon2 and opaque database-backed HTTP-only sessions.

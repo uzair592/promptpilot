@@ -16,6 +16,7 @@ __pycache__/
 !.env.test.example
 .local/
 storage/
+*.db
 .idea/
 .vscode/
 *.log
