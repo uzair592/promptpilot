@@ -17,6 +17,7 @@ class Settings:
     llm_base_url: str = os.getenv("LLM_BASE_URL", "")
     llm_model: str = os.getenv("LLM_MODEL", "")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    llm_timeout: float = float(os.getenv("LLM_TIMEOUT", "30"))
 
 
 @lru_cache

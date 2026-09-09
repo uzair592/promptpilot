@@ -1,5 +1,8 @@
+import json
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, Field
 
@@ -65,6 +68,47 @@ class OpenAICompatibleProvider:
         self.base_url = settings.llm_base_url
         self.model = settings.llm_model
         self.api_key = settings.llm_api_key
+        self.timeout = settings.llm_timeout
 
     def analyze(self, prompt: str) -> AIAnalysis:
-        raise ProviderUnavailable("No OpenAI-compatible provider implementation is configured")
+        if not self.base_url or not self.model or not self.api_key:
+            raise ProviderUnavailable("OpenRouter configuration is incomplete")
+        schema = AIAnalysis.model_json_schema()
+        body = json.dumps(
+            {
+                "model": self.model,
+                "temperature": 0,
+                "messages": [
+                    {"role": "system", "content": ANALYZER_SYSTEM_INSTRUCTION},
+                    {"role": "user", "content": json.dumps({"prompt": prompt})},
+                ],
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {"name": "prompt_analysis", "strict": True, "schema": schema},
+                },
+            }
+        ).encode()
+        request = Request(
+            f"{self.base_url.rstrip('/')}/chat/completions",
+            data=body,
+            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                payload = json.loads(response.read())
+        except HTTPError as error:
+            if error.code in {401, 429} or error.code >= 500:
+                raise ProviderUnavailable(
+                    f"OpenRouter request failed with status {error.code}"
+                ) from None
+            raise ProviderUnavailable("OpenRouter rejected the request") from None
+        except (URLError, TimeoutError):
+            raise ProviderUnavailable("OpenRouter is unavailable or timed out") from None
+        try:
+            content = payload["choices"][0]["message"]["content"]
+            return AIAnalysis.model_validate(
+                json.loads(content) if isinstance(content, str) else content
+            )
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValueError) as error:
+            raise ProviderUnavailable("OpenRouter returned invalid structured analysis") from error
