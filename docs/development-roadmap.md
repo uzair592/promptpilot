@@ -1,14 +1,14 @@
 # Development Roadmap
 
-## Phase 0: Requirements and architecture
+## Phase 0: Requirements and architecture - complete
 
-Capture scope, domain language, quality goals, security boundaries, and measurable evaluation criteria.
+Capture scope, domain language, quality goals, security boundaries, measurable evaluation criteria, and the detailed product/software specification.
 
-## Phase 1: Repository and development infrastructure
+## Phase 1: Repository and development infrastructure - complete
 
-Establish the monorepo boundaries, documentation, environment templates, quality gates, and CI-ready test scaffolds. This is the current phase.
+Establish the monorepo boundaries, documentation, environment templates, quality gates, and CI-ready test scaffolds.
 
-## Phase 2: Authentication and user management
+## Phase 2: Authentication and user management - next implementation slice
 
 Implement identity, sessions, authorization, project ownership, and audit foundations.
 

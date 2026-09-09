@@ -8,3 +8,4 @@ The detailed records are in `docs/adr/`. The current decisions are:
 - ADR-0004: Use replaceable AI provider ports and adapters.
 - ADR-0005: Treat documents and generated content as untrusted; isolate future execution.
 - ADR-0006: Make automated quality gates and measurable evaluation first-class.
+- ADR-0007: Complete product specification before feature implementation.
