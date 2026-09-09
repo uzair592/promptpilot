@@ -54,13 +54,19 @@ def test_conversation_roles_update_and_member_permissions(client):
     conversation_id = client.post(
         f"/api/v1/projects/{project_id}/conversations", json={"title": "Initial"}
     ).json()["id"]
-    assert client.patch(
-        f"/api/v1/conversations/{conversation_id}", json={"title": "Renamed"}
-    ).status_code == 200
-    assert client.post(
-        f"/api/v1/conversations/{conversation_id}/messages",
-        json={"role": "invalid", "content": "No"},
-    ).status_code == 422
+    assert (
+        client.patch(
+            f"/api/v1/conversations/{conversation_id}", json={"title": "Renamed"}
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            json={"role": "invalid", "content": "No"},
+        ).status_code
+        == 422
+    )
 
     client.post("/api/v1/auth/logout")
     register(client, "member@example.com", "Member")
@@ -76,13 +82,19 @@ def test_conversation_roles_update_and_member_permissions(client):
         db.add(ProjectMember(project_id=UUID(project_id), user_id=user.id, role="member"))
         db.commit()
     assert client.get(f"/api/v1/conversations/{conversation_id}").status_code == 200
-    assert client.patch(
-        f"/api/v1/conversations/{conversation_id}", json={"title": "Blocked"}
-    ).status_code == 403
-    assert client.post(
-        f"/api/v1/conversations/{conversation_id}/messages",
-        json={"role": "user", "content": "Blocked"},
-    ).status_code == 403
+    assert (
+        client.patch(
+            f"/api/v1/conversations/{conversation_id}", json={"title": "Blocked"}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            json={"role": "user", "content": "Blocked"},
+        ).status_code
+        == 403
+    )
 
 
 def test_cross_project_access_and_archived_mutation_denied(client):
@@ -92,13 +104,19 @@ def test_cross_project_access_and_archived_mutation_denied(client):
         f"/api/v1/projects/{project_id}/conversations", json={"title": "Initial"}
     ).json()["id"]
     client.post(f"/api/v1/projects/{project_id}/archive")
-    assert client.patch(
-        f"/api/v1/conversations/{conversation_id}", json={"title": "Blocked"}
-    ).status_code == 409
-    assert client.post(
-        f"/api/v1/conversations/{conversation_id}/messages",
-        json={"role": "user", "content": "Blocked"},
-    ).status_code == 409
+    assert (
+        client.patch(
+            f"/api/v1/conversations/{conversation_id}", json={"title": "Blocked"}
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            f"/api/v1/conversations/{conversation_id}/messages",
+            json={"role": "user", "content": "Blocked"},
+        ).status_code
+        == 409
+    )
 
     client.post("/api/v1/auth/logout")
     register(client, "other@example.com", "Other")

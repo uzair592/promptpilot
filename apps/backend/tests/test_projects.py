@@ -56,8 +56,7 @@ def test_create_owner_list_detail_update_archive(client):
     )
     assert client.post(f"/api/v1/projects/{project['id']}/archive").json()["status"] == "archived"
     assert (
-        client.patch(f"/api/v1/projects/{project['id']}", json={"name": "Nope"}).status_code
-        == 409
+        client.patch(f"/api/v1/projects/{project['id']}", json={"name": "Nope"}).status_code == 409
     )
 
 
@@ -77,12 +76,8 @@ def test_member_can_read_editor_can_update_and_member_cannot(client):
         assert owner is not None and member_user is not None and editor_user is not None
         db.add_all(
             [
-                    ProjectMember(
-                        project_id=UUID(project_id), user_id=member_user.id, role="member"
-                    ),
-                    ProjectMember(
-                        project_id=UUID(project_id), user_id=editor_user.id, role="editor"
-                    ),
+                ProjectMember(project_id=UUID(project_id), user_id=member_user.id, role="member"),
+                ProjectMember(project_id=UUID(project_id), user_id=editor_user.id, role="editor"),
             ]
         )
         db.commit()
@@ -99,8 +94,7 @@ def test_member_can_read_editor_can_update_and_member_cannot(client):
     )
     assert response.status_code == 200
     assert (
-        client.patch(f"/api/v1/projects/{project_id}", json={"name": "Edited"}).status_code
-        == 200
+        client.patch(f"/api/v1/projects/{project_id}", json={"name": "Edited"}).status_code == 200
     )
 
 
