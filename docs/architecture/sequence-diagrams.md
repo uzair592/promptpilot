@@ -125,3 +125,40 @@ sequenceDiagram
   API->>DB: evaluation snapshot
   API-->>UI: evaluation
 ```
+
+## Create Conversation and Send Message
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant UI as Frontend
+  participant API
+  participant Policy as Project Policy
+  participant DB as PostgreSQL
+  User->>UI: New conversation
+  UI->>API: POST /projects/{id}/conversations
+  API->>Policy: require editor access
+  Policy->>DB: resolve project membership
+  API->>DB: insert conversation
+  API-->>UI: conversation DTO
+  User->>UI: Send message
+  UI->>API: POST /conversations/{id}/messages
+  API->>Policy: resolve conversation project access
+  API->>DB: insert message with next sequence
+  API-->>UI: stored user message
+```
+
+## Load Message History
+
+```mermaid
+sequenceDiagram
+  participant UI as Frontend
+  participant API
+  participant Policy as Project Policy
+  participant DB as PostgreSQL
+  UI->>API: GET /conversations/{id}/messages
+  API->>Policy: resolve conversation -> project membership
+  API->>DB: select page ordered by sequence
+  DB-->>API: messages
+  API-->>UI: ordered message page
+```

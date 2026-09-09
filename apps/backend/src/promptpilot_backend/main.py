@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import get_settings
+from .conversation_routes import conversation_router
+from .conversation_routes import project_router as conversation_project_router
 from .db import Base, engine
 from .errors import error_response
 from .project_routes import router as project_router
@@ -39,3 +41,5 @@ def validation_error(request: Request, _: RequestValidationError) -> JSONRespons
 
 app.include_router(router)
 app.include_router(project_router)
+app.include_router(conversation_project_router)
+app.include_router(conversation_router)

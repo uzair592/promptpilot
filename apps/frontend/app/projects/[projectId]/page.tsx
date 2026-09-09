@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { apiBaseUrl, getProject } from "../../../lib/projects";
+import { ConversationWorkspace } from "./ConversationWorkspace";
 
 type ProjectDetail = {
   name: string;
@@ -69,14 +70,14 @@ export default function ProjectPage() {
           {new Date(project.created_at).toLocaleDateString()}
         </small>
       </section>
+      <ConversationWorkspace
+        projectId={params.projectId}
+        canWrite={
+          project.current_user_role !== "member" && project.status === "active"
+        }
+      />
       <div className="placeholder-grid">
-        {[
-          "Conversation",
-          "Context",
-          "Requirements",
-          "Prompts",
-          "Evaluations",
-        ].map((item) => (
+        {["Context", "Requirements", "Prompts", "Evaluations"].map((item) => (
           <section className="panel" key={item}>
             <h3>{item}</h3>
             <p className="muted">

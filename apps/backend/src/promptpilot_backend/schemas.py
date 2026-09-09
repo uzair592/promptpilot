@@ -98,3 +98,80 @@ class PageMetadata(BaseModel):
 class ProjectListResponse(BaseModel):
     items: list[ProjectResponse]
     page: PageMetadata
+
+
+class ConversationCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+
+    @field_validator("title")
+    @classmethod
+    def title_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Conversation title must not be blank")
+        return value
+
+
+class ConversationUpdateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+
+    @field_validator("title")
+    @classmethod
+    def update_title_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Conversation title must not be blank")
+        return value
+
+
+class ConversationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    title: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationDetailResponse(ConversationResponse):
+    current_user_role: str
+
+
+class ConversationListResponse(BaseModel):
+    items: list[ConversationResponse]
+    page: PageMetadata
+
+
+class MessageCreateRequest(BaseModel):
+    role: str = Field(min_length=1, max_length=20)
+    content: str = Field(min_length=1, max_length=100000)
+
+    @field_validator("role")
+    @classmethod
+    def valid_role(cls, value: str) -> str:
+        if value not in {"user", "assistant", "system"}:
+            raise ValueError("Message role must be user, assistant, or system")
+        return value
+
+    @field_validator("content")
+    @classmethod
+    def content_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Message content must not be blank")
+        return value
+
+
+class MessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    conversation_id: UUID
+    role: str
+    content: str
+    sequence: int
+    created_at: datetime
+
+
+class MessageListResponse(BaseModel):
+    items: list[MessageResponse]
+    page: PageMetadata
