@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -152,8 +152,8 @@ class OpenAICompatibleProvider:
         )
         try:
             with urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read())
-            content = payload["choices"][0]["message"]["content"]
+                response_payload: Any = json.loads(response.read())
+            content = response_payload["choices"][0]["message"]["content"]
             return GeneratedQuestion.model_validate(
                 json.loads(content) if isinstance(content, str) else content
             )
