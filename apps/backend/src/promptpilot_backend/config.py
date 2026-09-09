@@ -8,6 +8,11 @@ class Settings:
     session_cookie_name: str = os.getenv("SESSION_COOKIE_NAME", "promptpilot_session")
     session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", "604800"))
     secure_cookies: bool = os.getenv("APP_ENV", "development") == "production"
+    cors_origins: list[str] = [
+        origin.strip()
+        for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+        if origin.strip()
+    ]
 
 
 @lru_cache

@@ -1,12 +1,21 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
+from .config import get_settings
 from .db import Base, engine
 from .errors import error_response
 from .routes import router
 
 app = FastAPI(title="PromptPilot API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_settings().cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "X-Request-Id"],
+)
 
 
 @app.on_event("startup")
