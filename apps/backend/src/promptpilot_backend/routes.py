@@ -55,9 +55,7 @@ def register(
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(
-    payload: LoginRequest, response: Response, db: Session = Depends(get_db)
-) -> AuthResponse:
+def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
     user = db.scalar(
         select(User).where(User.normalized_email == normalize_email(str(payload.email)))
     )

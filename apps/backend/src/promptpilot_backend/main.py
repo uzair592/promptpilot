@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from .analysis_routes import router as analysis_router
 from .config import get_settings
 from .conversation_routes import conversation_router
 from .conversation_routes import project_router as conversation_project_router
@@ -43,3 +44,4 @@ app.include_router(router)
 app.include_router(project_router)
 app.include_router(conversation_project_router)
 app.include_router(conversation_router)
+app.include_router(analysis_router)

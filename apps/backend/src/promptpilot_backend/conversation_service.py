@@ -27,8 +27,10 @@ def create_conversation(
 def list_conversations(
     db: Session, project_id: UUID, offset: int, limit: int
 ) -> tuple[list[Conversation], int]:
-    query = select(Conversation).where(Conversation.project_id == project_id).order_by(
-        Conversation.updated_at.desc(), Conversation.id.desc()
+    query = (
+        select(Conversation)
+        .where(Conversation.project_id == project_id)
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
     )
     total = (
         db.scalar(
@@ -110,8 +112,10 @@ def add_message(
 def list_messages(
     db: Session, conversation_id: UUID, offset: int, limit: int
 ) -> tuple[list[Message], int]:
-    query = select(Message).where(Message.conversation_id == conversation_id).order_by(
-        Message.sequence.asc()
+    query = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.sequence.asc())
     )
     total = (
         db.scalar(

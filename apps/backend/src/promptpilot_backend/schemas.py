@@ -175,3 +175,39 @@ class MessageResponse(BaseModel):
 class MessageListResponse(BaseModel):
     items: list[MessageResponse]
     page: PageMetadata
+
+
+class AnalysisDimensionResponse(BaseModel):
+    key: str
+    score: int | None
+    status: str
+    applicable: bool
+    evidence: str | None
+    explanation: str
+
+
+class InformationGapResponse(BaseModel):
+    id: UUID
+    dimension: str
+    title: str
+    description: str
+    severity: str
+    importance: str
+    question_target: str
+    status: str
+
+
+class PromptAnalysisResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    project_id: UUID
+    conversation_id: UUID
+    message_id: UUID
+    task_category: str
+    overall_score: int
+    status: str
+    analysis_version: str
+    created_at: datetime
+    dimensions: list[AnalysisDimensionResponse]
+    gaps: list[InformationGapResponse]

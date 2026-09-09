@@ -39,6 +39,11 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP"]
 ignore = ["B008"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/promptpilot_backend/analyzer_service.py" = ["E501"]
+"src/promptpilot_backend/analysis_routes.py" = ["E501"]
+"src/promptpilot_backend/models.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

@@ -130,3 +130,62 @@ class Message(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class PromptAnalysis(Base):
+    __tablename__ = "prompt_analyses"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    message_id: Mapped[UUID] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), index=True
+    )
+    task_category: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    overall_score: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    analysis_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    dimensions: Mapped[list["PromptAnalysisDimension"]] = relationship(
+        back_populates="analysis", cascade="all, delete-orphan"
+    )
+    gaps: Mapped[list["InformationGap"]] = relationship(
+        back_populates="analysis", cascade="all, delete-orphan"
+    )
+
+
+class PromptAnalysisDimension(Base):
+    __tablename__ = "prompt_analysis_dimensions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    analysis_id: Mapped[UUID] = mapped_column(
+        ForeignKey("prompt_analyses.id", ondelete="CASCADE"), index=True
+    )
+    key: Mapped[str] = mapped_column(String(40), nullable=False)
+    score: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    applicable: Mapped[bool] = mapped_column(nullable=False)
+    evidence: Mapped[str | None] = mapped_column(Text)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    analysis: Mapped[PromptAnalysis] = relationship(back_populates="dimensions")
+
+
+class InformationGap(Base):
+    __tablename__ = "information_gaps"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    analysis_id: Mapped[UUID] = mapped_column(
+        ForeignKey("prompt_analyses.id", ondelete="CASCADE"), index=True
+    )
+    dimension: Mapped[str] = mapped_column(String(40), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    importance: Mapped[str] = mapped_column(String(20), nullable=False)
+    question_target: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="unresolved")
+    analysis: Mapped[PromptAnalysis] = relationship(back_populates="gaps")
