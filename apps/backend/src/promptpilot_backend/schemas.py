@@ -233,13 +233,6 @@ class AnswerCreateRequest(BaseModel):
     content: str = Field(min_length=1, max_length=10000)
 
 
-class QuestionSessionResponse(BaseModel):
-    id: UUID
-    status: str
-    stop_reason: str | None
-    next_question: QuestionResponse | None
-
-
 class ProjectMemoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
@@ -251,3 +244,12 @@ class ProjectMemoryResponse(BaseModel):
     confidence: int
     created_at: datetime
     updated_at: datetime
+
+
+class QuestionSessionResponse(BaseModel):
+    id: UUID
+    status: str
+    stop_reason: str | None
+    next_question: QuestionResponse | None
+    analysis: PromptAnalysisResponse | None = None
+    memory_updates: list[ProjectMemoryResponse] = []

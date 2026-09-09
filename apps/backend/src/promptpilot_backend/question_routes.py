@@ -11,7 +11,13 @@ from .memory_service import ProjectMemoryService
 from .models import Question, QuestionSession, User
 from .project_policy import ProjectRole
 from .question_service import answer_question, next_question, reanalyze_after_answer
-from .schemas import AnswerCreateRequest, QuestionResponse, QuestionSessionResponse
+from .schemas import (
+    AnswerCreateRequest,
+    ProjectMemoryResponse,
+    PromptAnalysisResponse,
+    QuestionResponse,
+    QuestionSessionResponse,
+)
 
 router = APIRouter(prefix="/api/v1/conversations/{conversation_id}", tags=["questions"])
 
@@ -64,13 +70,18 @@ def submit_answer(
         raise HTTPException(status_code=404, detail="Question not found or no longer answerable")
     answer = answer_question(db, question, payload.content)
     ProjectMemoryService().add_user_answer(db, session.project_id, question.text, answer.content)
-    reanalyze_after_answer(db, session, answer)
+    analysis = reanalyze_after_answer(db, session, answer)
     question = next_question(db, session)
     return QuestionSessionResponse(
         id=session.id,
         status=session.status,
         stop_reason=session.stop_reason,
         next_question=QuestionResponse.model_validate(question) if question else None,
+        analysis=PromptAnalysisResponse.model_validate(analysis),
+        memory_updates=[
+            ProjectMemoryResponse.model_validate(item)
+            for item in ProjectMemoryService().active(db, session.project_id)
+        ],
     )
 
 

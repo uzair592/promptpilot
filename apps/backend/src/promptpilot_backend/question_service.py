@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .analyzer_service import analyze_message
+from .analyzer_service import AnalysisInput, analyze_input
 from .config import get_settings
 from .llm_provider import OpenAICompatibleProvider, ProviderUnavailable
 from .memory_service import ProjectMemoryService
@@ -37,6 +37,7 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
         db.commit()
         return None
     gap = max(gaps, key=lambda item: (SEVERITY_WEIGHT.get(item.severity, 0), item.importance))
+    previous_texts = {" ".join(item.text.lower().split()) for item in session.questions}
     priority = SEVERITY_WEIGHT.get(gap.severity, 0)
     analysis = db.get(PromptAnalysis, session.latest_analysis_id or session.analysis_id)
     original = db.get(Message, analysis.message_id) if analysis else None
@@ -69,6 +70,9 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
             source = "ai"
         except (ProviderUnavailable, ValueError):
             pass
+    if " ".join(generated.question_text.lower().split()) in previous_texts:
+        generated = DeterministicQuestionGenerator().generate(request)
+        source = "fallback"
     question = Question(
         session_id=session.id,
         gap_id=gap.id,
@@ -102,9 +106,14 @@ def reanalyze_after_answer(db: Session, session: QuestionSession, answer: Answer
     if original is None:
         raise ValueError("Question source message is missing")
     memory = ProjectMemoryService().active(db, previous.project_id)
-    context = "\n".join(f"{item.subject}: {item.content}" for item in memory)
-    analysis = analyze_message(
-        db, previous.project_id, previous.conversation_id, original, context=context
+    input_value = AnalysisInput(
+        original_prompt=original.content,
+        task_category=previous.task_category,
+        memory_items=tuple({"subject": item.subject, "content": item.content} for item in memory),
+        relevant_answers=tuple(item.content for item in memory if item.source == "user"),
+    )
+    analysis = analyze_input(
+        db, previous.project_id, previous.conversation_id, input_value, original.id
     )
     session.latest_analysis_id = analysis.id
     answered_question = db.get(Question, answer.question_id)

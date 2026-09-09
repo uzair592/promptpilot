@@ -21,6 +21,17 @@ DIMENSIONS = (
 
 
 @dataclass(frozen=True)
+class AnalysisInput:
+    original_prompt: str
+    task_category: str
+    memory_items: tuple[dict[str, str], ...] = ()
+    known_requirements: tuple[str, ...] = ()
+    known_constraints: tuple[str, ...] = ()
+    known_preferences: tuple[str, ...] = ()
+    relevant_answers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class DimensionResult:
     key: str
     score: int | None
@@ -219,3 +230,13 @@ def analyze_message(
     db.commit()
     db.refresh(analysis)
     return analysis
+
+
+def analyze_input(
+    db: Session, project_id: UUID, conversation_id: UUID, value: AnalysisInput, message_id: UUID
+) -> PromptAnalysis:
+    context = "\n".join(f"{item['subject']}: {item['content']}" for item in value.memory_items)
+    message = Message(
+        id=message_id, conversation_id=conversation_id, role="user", content=value.original_prompt
+    )
+    return analyze_message(db, project_id, conversation_id, message, context=context)
