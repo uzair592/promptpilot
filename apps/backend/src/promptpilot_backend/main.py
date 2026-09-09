@@ -8,6 +8,7 @@ from .config import get_settings
 from .conversation_routes import conversation_router
 from .conversation_routes import project_router as conversation_project_router
 from .db import Base, engine
+from .document_routes import router as document_router
 from .errors import error_response
 from .memory_routes import router as memory_router
 from .project_routes import router as project_router
@@ -49,3 +50,4 @@ app.include_router(conversation_router)
 app.include_router(analysis_router)
 app.include_router(question_router)
 app.include_router(memory_router)
+app.include_router(document_router)

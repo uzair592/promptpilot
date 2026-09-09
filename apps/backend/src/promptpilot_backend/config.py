@@ -18,6 +18,8 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
     llm_timeout: float = float(os.getenv("LLM_TIMEOUT", "30"))
+    max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+    storage_path: str = os.getenv("STORAGE_PATH", "./storage")
 
 
 @lru_cache
