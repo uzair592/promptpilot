@@ -8,7 +8,11 @@ from .config import get_settings
 from .llm_provider import OpenAICompatibleProvider, ProviderUnavailable
 from .memory_service import ProjectMemoryService
 from .models import Answer, InformationGap, Message, PromptAnalysis, Question, QuestionSession
-from .question_generator import DeterministicQuestionGenerator, ProviderQuestionGenerator
+from .question_generator import (
+    DeterministicQuestionGenerator,
+    ProviderQuestionGenerator,
+    QuestionGenerationInput,
+)
 
 SEVERITY_WEIGHT = {"critical": 300, "important": 200, "optional": 100}
 
@@ -34,9 +38,24 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
         return None
     gap = max(gaps, key=lambda item: (SEVERITY_WEIGHT.get(item.severity, 0), item.importance))
     priority = SEVERITY_WEIGHT.get(gap.severity, 0)
-    generated = DeterministicQuestionGenerator().generate(
-        gap.question_target, str(gap.id), priority
+    analysis = db.get(PromptAnalysis, session.latest_analysis_id or session.analysis_id)
+    original = db.get(Message, analysis.message_id) if analysis else None
+    memory = ProjectMemoryService().active(db, session.project_id)
+    request = QuestionGenerationInput(
+        original_prompt=original.content if original else "",
+        task_category=analysis.task_category if analysis else "general",
+        gap_id=str(gap.id),
+        gap_target=gap.question_target,
+        severity=gap.severity,
+        importance=gap.importance,
+        priority=priority,
+        memory=tuple({"subject": item.subject, "content": item.content} for item in memory),
+        previous_questions=tuple(item.text for item in session.questions),
+        previous_answers=tuple(
+            answer.content for item in session.questions for answer in item.answers
+        ),
     )
+    generated = DeterministicQuestionGenerator().generate(request)
     source = "fallback"
     settings = get_settings()
     if (
@@ -46,9 +65,7 @@ def next_question(db: Session, session: QuestionSession) -> Question | None:
         and settings.llm_api_key
     ):
         try:
-            generated = ProviderQuestionGenerator(OpenAICompatibleProvider()).generate(
-                gap.question_target, str(gap.id), priority
-            )
+            generated = ProviderQuestionGenerator(OpenAICompatibleProvider()).generate(request)
             source = "ai"
         except (ProviderUnavailable, ValueError):
             pass

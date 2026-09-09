@@ -238,3 +238,16 @@ class QuestionSessionResponse(BaseModel):
     status: str
     stop_reason: str | None
     next_question: QuestionResponse | None
+
+
+class ProjectMemoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    category: str
+    subject: str
+    content: str
+    source: str
+    status: str
+    confidence: int
+    created_at: datetime
+    updated_at: datetime
