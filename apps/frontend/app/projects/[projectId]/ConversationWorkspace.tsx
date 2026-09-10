@@ -115,7 +115,10 @@ export function ConversationWorkspace({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message_id: message.id, mode: generationMode }),
+          body: JSON.stringify({
+            message_id: message.id,
+            mode: generationMode,
+          }),
         },
       );
       if (!response.ok) throw new Error("Generation failed");
@@ -217,18 +220,27 @@ export function ConversationWorkspace({
                     )}
                     {analysis[message.id] && canWrite && (
                       <>
-                      <select value={generationMode} onChange={(event) => setGenerationMode(event.target.value)} aria-label="Generation mode">
-                        <option value="minimal">Minimal</option><option value="structured">Structured</option><option value="detailed">Detailed</option>
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => generate(message)}
-                        disabled={generating === message.id}
-                      >
-                        {generating === message.id
-                          ? "Generating..."
-                          : "Generate optimized prompt"}
-                      </button></>
+                        <select
+                          value={generationMode}
+                          onChange={(event) =>
+                            setGenerationMode(event.target.value)
+                          }
+                          aria-label="Generation mode"
+                        >
+                          <option value="minimal">Minimal</option>
+                          <option value="structured">Structured</option>
+                          <option value="detailed">Detailed</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => generate(message)}
+                          disabled={generating === message.id}
+                        >
+                          {generating === message.id
+                            ? "Generating..."
+                            : "Generate optimized prompt"}
+                        </button>
+                      </>
                     )}
                     {generated[message.id] && (
                       <div className="prompt-meter">
@@ -246,7 +258,16 @@ export function ConversationWorkspace({
                           Context sources:{" "}
                           {generated[message.id].incorporated_context.length}
                         </small>
-                        <button type="button" onClick={() => navigator.clipboard.writeText(generated[message.id].optimized_prompt)}>Copy optimized prompt</button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigator.clipboard.writeText(
+                              generated[message.id].optimized_prompt,
+                            )
+                          }
+                        >
+                          Copy optimized prompt
+                        </button>
                       </div>
                     )}
                   </article>
