@@ -1,5 +1,13 @@
 # Architecture
 
+The implemented FYP core follows:
+
+`USER INTENT -> ANALYSIS -> QUESTIONS -> ANSWERS -> MEMORY -> RETRIEVAL -> CONTEXT ASSEMBLY -> PROMPT GENERATION -> PROMPT VERSION`
+
+Prompt generation is the first stage that turns assembled project context into an
+executable optimized prompt. Autonomous coding, deployment, agents, evaluation,
+embeddings, and vector search remain future startup capabilities.
+
 ## Shape
 
 PromptPilot is a modular monorepo with a Next.js frontend boundary, a Python/FastAPI backend boundary, a shared contracts package, and documentation/test infrastructure. The backend follows dependency inversion: HTTP and persistence depend on application use cases; domain logic depends on interfaces, not frameworks or vendors.
