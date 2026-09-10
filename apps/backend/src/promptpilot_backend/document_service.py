@@ -6,6 +6,7 @@ import io
 import ipaddress
 import re
 import socket
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,10 @@ ALLOWED_TYPES = {
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 }
 MAGIC = {".pdf": b"%PDF-", ".docx": b"PK", ".xlsx": b"PK"}
+OOXML_REQUIRED = {
+    ".docx": {"[Content_Types].xml", "word/document.xml"},
+    ".xlsx": {"[Content_Types].xml", "xl/workbook.xml"},
+}
 
 
 @dataclass(frozen=True)
@@ -53,6 +58,7 @@ class BasicDocumentParser(DocumentParser):
             reader = PdfReader(io.BytesIO(content), strict=True)
             return [ParsedContent(page.extract_text() or "", f"{name} — page {index}") for index, page in enumerate(reader.pages, 1)]
         if extension == ".docx":
+            _validate_ooxml(content, extension)
             document = WordDocument(io.BytesIO(content))
             paragraphs = [ParsedContent(f"[Paragraph] {paragraph.text}", f"{name} — paragraph {index}") for index, paragraph in enumerate(document.paragraphs, 1) if paragraph.text.strip()]
             for table_index, table in enumerate(document.tables, 1):
@@ -61,6 +67,7 @@ class BasicDocumentParser(DocumentParser):
                     paragraphs.append(ParsedContent(f"[Table] {' | '.join(table_rows)}", f"{name} — table {table_index}"))
             return paragraphs
         if extension == ".xlsx":
+            _validate_ooxml(content, extension)
             workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=False, keep_links=False)
             result: list[ParsedContent] = []
             for sheet in workbook.worksheets:
@@ -102,6 +109,16 @@ def _public_host(hostname: str) -> None:
         raise ValueError("URL destination is not public")
 
 
+def _validate_ooxml(content: bytes, extension: str) -> None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            names = set(archive.namelist())
+            if not OOXML_REQUIRED[extension].issubset(names):
+                raise ValueError("Invalid Office document structure")
+            if any(name.startswith("../") or name.startswith("/") for name in names):
+                raise ValueError("Invalid Office document structure")
+    except (zipfile.BadZipFile, KeyError) as error:
+        raise ValueError("Invalid Office document structure") from error
 class UrlIngestionService:
     def __init__(self, document_service: DocumentService | None = None) -> None:
         self.document_service = document_service or DocumentService()
@@ -115,19 +132,26 @@ class UrlIngestionService:
             if parsed.scheme not in {"http", "https"} or not parsed.hostname:
                 raise ValueError("Only public HTTP and HTTPS URLs are supported")
             _public_host(parsed.hostname)
-            with httpx.Client(timeout=timeout, follow_redirects=False) as client:
-                response = client.get(current, headers={"User-Agent": "PromptPilot/1.0"})
-            if response.status_code in {301, 302, 303, 307, 308}:
-                location = response.headers.get("location")
-                if not location:
-                    raise ValueError("Redirect response has no location")
-                current = urljoin(current, location)
-                continue
-            if response.status_code >= 400:
-                raise ValueError("URL could not be fetched")
-            if len(response.content) > settings.url_max_response_bytes:
-                raise ValueError("URL response exceeds configured size limit")
-            return current, response.headers.get("content-type", "").split(";", 1)[0].lower(), response.content
+            try:
+                with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+                    with client.stream("GET", current, headers={"User-Agent": "PromptPilot/1.0"}) as response:
+                        if response.status_code in {301, 302, 303, 307, 308}:
+                            location = response.headers.get("location")
+                            if not location:
+                                raise ValueError("Redirect response has no location")
+                            current = urljoin(current, location)
+                            continue
+                        if response.status_code >= 400:
+                            raise ValueError("URL could not be fetched")
+                        body = bytearray()
+                        for chunk in response.iter_bytes():
+                            if len(body) + len(chunk) > settings.url_max_response_bytes:
+                                raise ValueError("URL response exceeds configured size limit")
+                            body.extend(chunk)
+                        media_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                        return current, media_type, bytes(body)
+            except (httpx.TimeoutException, httpx.NetworkError) as error:
+                raise ValueError("URL fetch timed out or failed") from error
         raise ValueError("URL redirect limit exceeded")
 
     def ingest_url(self, db: Session, project_id: UUID, url: str) -> Document:

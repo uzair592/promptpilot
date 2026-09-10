@@ -66,3 +66,54 @@ def test_url_ssrf_destinations_are_rejected(url):
 def test_private_host_is_rejected():
     with pytest.raises(ValueError):
         _public_host("127.0.0.1")
+
+
+def test_arbitrary_zip_is_not_office_document():
+    import zipfile
+
+    stream = BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("payload.txt", "not an office document")
+    with pytest.raises(ValueError, match="Office document"):
+        BasicDocumentParser().parse(
+            "fake.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            stream.getvalue(),
+        )
+
+
+def test_url_streaming_enforces_limit(monkeypatch):
+    import promptpilot_backend.document_service as module
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "text/plain"}
+
+        def __enter__(self): return self
+        def __exit__(self, *_): return None
+        def iter_bytes(self): return [b"1234", b"5678"]
+
+    class Client:
+        def __init__(self, **_): pass
+        def __enter__(self): return self
+        def __exit__(self, *_): return None
+        def stream(self, *_args, **_kwargs): return Response()
+
+    monkeypatch.setattr(module.httpx, "Client", Client)
+    monkeypatch.setattr(module, "_public_host", lambda _: None)
+    monkeypatch.setattr(
+        module,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "url_read_timeout": 1,
+                "url_connect_timeout": 1,
+                "url_max_response_bytes": 7,
+                "url_max_redirects": 1,
+            },
+        )(),
+    )
+    with pytest.raises(ValueError, match="exceeds"):
+        UrlIngestionService().fetch("https://example.com")
