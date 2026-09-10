@@ -13,6 +13,7 @@ from .document_routes import router as document_router
 from .errors import error_response
 from .memory_routes import router as memory_router
 from .project_routes import router as project_router
+from .prompt_routes import router as prompt_router
 from .question_routes import router as question_router
 from .routes import router
 
@@ -53,3 +54,4 @@ app.include_router(question_router)
 app.include_router(memory_router)
 app.include_router(document_router)
 app.include_router(context_router)
+app.include_router(prompt_router)

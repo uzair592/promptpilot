@@ -314,3 +314,21 @@ class DocumentChunk(Base):
     character_count: Mapped[int] = mapped_column(Integer, nullable=False)
     processing_version: Mapped[str] = mapped_column(String(40), nullable=False)
     document: Mapped[Document] = relationship(back_populates="chunks")
+
+
+class PromptVersion(Base):
+    __tablename__ = "prompt_versions"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    source_message_id: Mapped[UUID] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+    analysis_id: Mapped[UUID | None] = mapped_column(ForeignKey("prompt_analyses.id", ondelete="SET NULL"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    optimized_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    generation_mode: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(160), nullable=False)
+    fallback_used: Mapped[bool] = mapped_column(nullable=False, default=False)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

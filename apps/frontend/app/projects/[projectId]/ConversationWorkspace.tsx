@@ -12,6 +12,7 @@ import {
   analyzeMessage,
   PromptAnalysis,
 } from "../../../lib/conversations";
+import { apiBaseUrl } from "../../../lib/projects";
 
 export function ConversationWorkspace({
   projectId,
@@ -29,6 +30,19 @@ export function ConversationWorkspace({
   const [draft, setDraft] = useState("");
   const [analysis, setAnalysis] = useState<Record<string, PromptAnalysis>>({});
   const [analyzing, setAnalyzing] = useState<string | null>(null);
+  const [generating, setGenerating] = useState<string | null>(null);
+  const [generated, setGenerated] = useState<
+    Record<
+      string,
+      {
+        optimized_prompt: string;
+        original_prompt: string;
+        task_summary: string;
+        warnings: string[];
+        incorporated_context: string[];
+      }
+    >
+  >({});
   useEffect(() => {
     getConversations(projectId)
       .then((items) => {
@@ -88,6 +102,31 @@ export function ConversationWorkspace({
       setError("Analysis could not be completed. Please try again.");
     } finally {
       setAnalyzing(null);
+    }
+  }
+  async function generate(message: Message) {
+    setGenerating(message.id);
+    setError("");
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/v1/conversations/${selected?.id}/prompts/generate`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message_id: message.id, mode: "structured" }),
+        },
+      );
+      if (!response.ok) throw new Error("Generation failed");
+      const generatedPrompt = await response.json();
+      setGenerated((items) => ({
+        ...items,
+        [message.id]: generatedPrompt,
+      }));
+    } catch {
+      setError("Prompt generation could not be completed.");
+    } finally {
+      setGenerating(null);
     }
   }
   if (loading) return <p className="muted">Loading conversations...</p>;
@@ -173,6 +212,35 @@ export function ConversationWorkspace({
                             ))}
                           </>
                         )}
+                      </div>
+                    )}
+                    {analysis[message.id] && canWrite && (
+                      <button
+                        type="button"
+                        onClick={() => generate(message)}
+                        disabled={generating === message.id}
+                      >
+                        {generating === message.id
+                          ? "Generating..."
+                          : "Generate optimized prompt"}
+                      </button>
+                    )}
+                    {generated[message.id] && (
+                      <div className="prompt-meter">
+                        <h3>Original prompt</h3>
+                        <p>{generated[message.id].original_prompt}</p>
+                        <h3>Optimized prompt</h3>
+                        <p>{generated[message.id].optimized_prompt}</p>
+                        <small>{generated[message.id].task_summary}</small>
+                        {generated[message.id].warnings.map((warning) => (
+                          <p className="muted" key={warning}>
+                            Warning: {warning}
+                          </p>
+                        ))}
+                        <small>
+                          Context sources:{" "}
+                          {generated[message.id].incorporated_context.length}
+                        </small>
                       </div>
                     )}
                   </article>

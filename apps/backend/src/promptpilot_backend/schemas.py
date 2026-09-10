@@ -305,3 +305,24 @@ class QuestionSessionResponse(BaseModel):
     next_question: QuestionResponse | None
     analysis: PromptAnalysisResponse | None = None
     memory_updates: list[ProjectMemoryResponse] = []
+
+
+class PromptGenerateRequest(BaseModel):
+    message_id: UUID
+    mode: str = Field(default="structured", pattern="^(structured|minimal|detailed)$")
+    regeneration_instruction: str = Field(default="", max_length=4000)
+
+
+class PromptGenerationResponse(BaseModel):
+    version_id: UUID
+    version_number: int
+    original_prompt: str
+    optimized_prompt: str
+    task_summary: str
+    assumptions: list[str]
+    incorporated_context: list[str]
+    incorporated_requirements: list[str]
+    output_format: str
+    quality_notes: list[str]
+    warnings: list[str]
+    generation_metadata: dict[str, object]
