@@ -11,6 +11,7 @@ from .conversation_routes import project_router as conversation_project_router
 from .db import Base, engine
 from .document_routes import router as document_router
 from .errors import error_response
+from .evaluation_routes import router as evaluation_router
 from .execution_routes import router as execution_router
 from .memory_routes import router as memory_router
 from .project_routes import router as project_router
@@ -57,3 +58,4 @@ app.include_router(document_router)
 app.include_router(context_router)
 app.include_router(prompt_router)
 app.include_router(execution_router)
+app.include_router(evaluation_router)

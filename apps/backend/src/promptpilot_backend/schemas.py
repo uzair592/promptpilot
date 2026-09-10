@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class RegisterRequest(BaseModel):
@@ -349,3 +349,129 @@ class ModelRunResponse(BaseModel):
     latency_ms: int | None
     error_message: str | None
     created_at: datetime
+
+
+EVALUATION_DIMENSIONS = (
+    "relevance",
+    "completeness",
+    "instruction_following",
+    "contextual_grounding",
+    "clarity",
+)
+EVALUATION_WEIGHTS = {
+    "relevance": 25,
+    "completeness": 20,
+    "instruction_following": 20,
+    "contextual_grounding": 20,
+    "clarity": 15,
+}
+
+
+class ResponseScore(BaseModel):
+    relevance: int = Field(ge=0, le=100)
+    completeness: int = Field(ge=0, le=100)
+    instruction_following: int = Field(ge=0, le=100)
+    contextual_grounding: int = Field(ge=0, le=100)
+    clarity: int = Field(ge=0, le=100)
+    explanations: dict[str, str] = Field(default_factory=dict)
+    evidence: dict[str, str] = Field(default_factory=dict)
+
+
+class LLMJudgeOutput(BaseModel):
+    """Strict structured output requested from an LLM judge."""
+
+    response_a: ResponseScore
+    response_b: ResponseScore
+
+
+class SingleRunEvaluationRequest(BaseModel):
+    method: str = Field(default="heuristic", pattern="^(heuristic|llm_judge)$")
+    evaluator: str | None = Field(default=None, pattern="^(heuristic|llm_judge)$")
+    model_run_id: UUID | None = Field(
+        default=None, validation_alias=AliasChoices("model_run_id", "run_id")
+    )
+    task: str | None = Field(default=None, min_length=1, max_length=100000)
+    original_task: str | None = Field(default=None, min_length=1, max_length=100000)
+    requirements: list[dict[str, object] | str] = Field(default_factory=list)
+    constraints: list[dict[str, object] | str] = Field(default_factory=list)
+    context: list[dict[str, object] | str] = Field(default_factory=list)
+
+    def selected_method(self) -> str:
+        return self.evaluator or self.method
+
+
+class CompareEvaluationRequest(BaseModel):
+    baseline_model_run_id: UUID | None = Field(
+        default=None,
+        validation_alias=AliasChoices("baseline_model_run_id", "baseline_run_id"),
+    )
+    promptpilot_model_run_id: UUID | None = Field(
+        default=None,
+        validation_alias=AliasChoices("promptpilot_model_run_id", "promptpilot_run_id"),
+    )
+    method: str = Field(default="heuristic", pattern="^(heuristic|llm_judge)$")
+    evaluator: str | None = Field(default=None, pattern="^(heuristic|llm_judge)$")
+    task: str | None = Field(default=None, min_length=1, max_length=100000)
+    original_task: str | None = Field(default=None, min_length=1, max_length=100000)
+    requirements: list[dict[str, object] | str] = Field(default_factory=list)
+    constraints: list[dict[str, object] | str] = Field(default_factory=list)
+    context: list[dict[str, object] | str] = Field(default_factory=list)
+
+    def selected_method(self) -> str:
+        return self.evaluator or self.method
+
+    def selected_run_ids(self) -> tuple[UUID, UUID]:
+        if self.baseline_model_run_id is None or self.promptpilot_model_run_id is None:
+            raise ValueError("baseline_model_run_id and promptpilot_model_run_id are required")
+        return self.baseline_model_run_id, self.promptpilot_model_run_id
+
+
+class EvaluationItemResponse(BaseModel):
+    id: UUID
+    evaluation_id: UUID
+    response_label: str
+    dimension: str
+    score: int
+    explanation: str
+
+
+class EvaluationResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    conversation_id: UUID
+    baseline_model_run_id: UUID | None
+    promptpilot_model_run_id: UUID | None
+    method: str
+    evaluator_provider: str
+    evaluator_model: str
+    rubric_version: str
+    baseline_score: float | None
+    promptpilot_score: float | None
+    overall_delta: float | None
+    winner: str | None
+    comparison_summary: str | None
+    baseline_strengths: list[str]
+    baseline_weaknesses: list[str]
+    promptpilot_strengths: list[str]
+    promptpilot_weaknesses: list[str]
+    metadata: dict[str, object]
+    created_at: datetime
+    items: list[EvaluationItemResponse]
+
+
+class EvaluationListResponse(BaseModel):
+    items: list[EvaluationResponse]
+
+
+# Explicit names keep the public contract readable for clients that distinguish
+# the two creation flows while sharing the same persisted response shape.
+class CompareEvaluationResponse(EvaluationResponse):
+    pass
+
+
+class SingleRunEvaluationResponse(EvaluationResponse):
+    pass
+
+
+class CompareResponsesRequest(CompareEvaluationRequest):
+    pass

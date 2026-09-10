@@ -16,6 +16,14 @@ psql "$env:DATABASE_URL" -f apps/backend/migrations/002_projects_and_memberships
 psql "$env:DATABASE_URL" -f apps/backend/migrations/003_conversations_and_messages.sql
 ```
 
+The response evaluation slice is applied after model runs. It stores one
+dimension row for each response and uses the relevance, completeness,
+instruction_following, contextual_grounding, and clarity rubric:
+
+```powershell
+psql "$env:DATABASE_URL" -f apps/backend/migrations/011_response_evaluations.sql
+```
+
 Projects use archive status instead of deletion. The owner membership is explicit and is created in the same transaction as its project.
 
 Messages use a per-conversation `sequence` for deterministic ordering. Clients may send `Idempotency-Key`; a repeated key in the same conversation returns the original message instead of inserting a duplicate.

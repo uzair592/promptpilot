@@ -11,6 +11,10 @@ import {
   sendMessage,
   analyzeMessage,
   PromptAnalysis,
+  Evaluation,
+  getEvaluations,
+  compareEvaluations,
+  evaluateRun,
 } from "../../../lib/conversations";
 import { apiBaseUrl } from "../../../lib/projects";
 
@@ -36,6 +40,7 @@ export function ConversationWorkspace({
     Record<
       string,
       {
+        id: string;
         response_text: string | null;
         execution_strategy: string;
         model: string;
@@ -43,6 +48,10 @@ export function ConversationWorkspace({
       }
     >
   >({});
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [comparing, setComparing] = useState(false);
+  const [selectedEvaluation, setSelectedEvaluation] =
+    useState<Evaluation | null>(null);
   const [generated, setGenerated] = useState<
     Record<
       string,
@@ -76,6 +85,9 @@ export function ConversationWorkspace({
     getMessages(selected.id)
       .then(setMessages)
       .catch(() => setError("We could not load message history."));
+    getEvaluations(selected.id)
+      .then(setEvaluations)
+      .catch(() => setError("We could not load evaluation history."));
   }, [selected]);
   async function newConversation() {
     const title = window.prompt("Conversation title", "New conversation");
@@ -163,6 +175,41 @@ export function ConversationWorkspace({
     if (response.ok) {
       const run = await response.json();
       setRuns((items) => ({ ...items, [`${message.id}-${strategy}`]: run }));
+    }
+  }
+  async function compare(message: Message) {
+    const baseline = runs[`${message.id}-baseline`];
+    const promptpilot = runs[`${message.id}-promptpilot`];
+    if (!baseline?.id || !promptpilot?.id || !selected) return;
+    setComparing(true);
+    setError("");
+    try {
+      const evaluation = await compareEvaluations(
+        selected.id,
+        baseline.id,
+        promptpilot.id,
+      );
+      setEvaluations((items) => [evaluation, ...items]);
+      setSelectedEvaluation(evaluation);
+    } catch {
+      setError("Responses could not be compared. Ensure both runs succeeded.");
+    } finally {
+      setComparing(false);
+    }
+  }
+  async function evaluateSingle(
+    message: Message,
+    strategy: "baseline" | "promptpilot",
+  ) {
+    const run = runs[`${message.id}-${strategy}`];
+    if (!run?.id) return;
+    setError("");
+    try {
+      const evaluation = await evaluateRun(selected?.id ?? "", run.id);
+      setEvaluations((items) => [evaluation, ...items]);
+      setSelectedEvaluation(evaluation);
+    } catch {
+      setError("The response could not be evaluated. Please try again.");
     }
   }
   if (loading) return <p className="muted">Loading conversations...</p>;
@@ -312,20 +359,40 @@ export function ConversationWorkspace({
                         >
                           Execute PromptPilot
                         </button>
+                        {runs[`${message.id}-baseline`]?.response_text &&
+                          runs[`${message.id}-promptpilot`]?.response_text && (
+                            <button
+                              type="button"
+                              onClick={() => compare(message)}
+                              disabled={comparing}
+                            >
+                              {comparing ? "Comparing..." : "Compare Responses"}
+                            </button>
+                          )}
                         {(["baseline", "promptpilot"] as const).map(
                           (strategy) =>
                             runs[`${message.id}-${strategy}`] && (
-                              <p key={strategy}>
-                                <b>{strategy}</b>:{" "}
-                                {
-                                  runs[`${message.id}-${strategy}`]
-                                    .response_text
-                                }{" "}
-                                ({runs[`${message.id}-${strategy}`].model},{" "}
-                                {runs[`${message.id}-${strategy}`].latency_ms ??
-                                  "-"}{" "}
-                                ms)
-                              </p>
+                              <div key={strategy}>
+                                <p>
+                                  <b>{strategy}</b>:{" "}
+                                  {
+                                    runs[`${message.id}-${strategy}`]
+                                      .response_text
+                                  }{" "}
+                                  ({runs[`${message.id}-${strategy}`].model},{" "}
+                                  {runs[`${message.id}-${strategy}`]
+                                    .latency_ms ?? "-"}{" "}
+                                  ms)
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    evaluateSingle(message, strategy)
+                                  }
+                                >
+                                  Evaluate {strategy}
+                                </button>
+                              </div>
                             ),
                         )}
                       </div>
@@ -335,6 +402,57 @@ export function ConversationWorkspace({
               )}
             </div>
             {error && <p className="error">{error}</p>}
+            <section className="prompt-meter" aria-label="Evaluation history">
+              <h3>Evaluation history</h3>
+              {evaluations.length === 0 ? (
+                <p className="muted">No evaluations yet.</p>
+              ) : (
+                <ul>
+                  {evaluations.map((evaluation) => (
+                    <li key={evaluation.id}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedEvaluation(evaluation)}
+                      >
+                        {evaluation.baseline_model_run_id &&
+                        evaluation.promptpilot_model_run_id
+                          ? "Comparison"
+                          : "Single response"}{" "}
+                        —{" "}
+                        {(
+                          evaluation.promptpilot_score ??
+                          evaluation.baseline_score ??
+                          0
+                        ).toFixed(1)}
+                        /100
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {selectedEvaluation && (
+                <div>
+                  <strong>Evaluation details</strong>
+                  {selectedEvaluation.overall_delta !== null && (
+                    <p>
+                      PromptPilot delta:{" "}
+                      {selectedEvaluation.overall_delta.toFixed(1)} points
+                    </p>
+                  )}
+                  {selectedEvaluation.comparison_summary && (
+                    <p>{selectedEvaluation.comparison_summary}</p>
+                  )}
+                  {selectedEvaluation.items.map((item) => (
+                    <p key={item.id}>
+                      <b>
+                        {item.response_label} {item.dimension}
+                      </b>
+                      : {item.score}/100 — {item.explanation}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </section>
             {canWrite ? (
               <form className="composer" onSubmit={submit}>
                 <textarea

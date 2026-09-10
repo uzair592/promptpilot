@@ -352,3 +352,61 @@ class ModelRun(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class Evaluation(Base):
+    """A persisted evaluation of one response or a baseline/prompt comparison."""
+
+    __tablename__ = "evaluations"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    baseline_model_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("model_runs.id", ondelete="SET NULL"), index=True
+    )
+    promptpilot_model_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("model_runs.id", ondelete="SET NULL"), index=True
+    )
+    method: Mapped[str] = mapped_column(String(30), nullable=False, default="heuristic")
+    evaluator_provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    evaluator_model: Mapped[str] = mapped_column(String(160), nullable=False)
+    rubric_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    baseline_score: Mapped[float | None] = mapped_column()
+    promptpilot_score: Mapped[float | None] = mapped_column()
+    overall_delta: Mapped[float | None] = mapped_column()
+    winner: Mapped[str | None] = mapped_column(String(20))
+    comparison_summary: Mapped[str | None] = mapped_column(Text)
+    baseline_strengths: Mapped[str | None] = mapped_column(Text)
+    baseline_weaknesses: Mapped[str | None] = mapped_column(Text)
+    promptpilot_strengths: Mapped[str | None] = mapped_column(Text)
+    promptpilot_weaknesses: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    items: Mapped[list["EvaluationItem"]] = relationship(
+        back_populates="evaluation", cascade="all, delete-orphan"
+    )
+
+
+class EvaluationItem(Base):
+    __tablename__ = "evaluation_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "evaluation_id", "response_label", "dimension",
+            name="uq_evaluation_items_evaluation_response_dimension",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    evaluation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("evaluations.id", ondelete="CASCADE"), index=True
+    )
+    response_label: Mapped[str] = mapped_column(String(20), nullable=False)
+    dimension: Mapped[str] = mapped_column(String(40), nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    evaluation: Mapped[Evaluation] = relationship(back_populates="items")
