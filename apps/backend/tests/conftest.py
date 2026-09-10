@@ -17,3 +17,11 @@ def client():
     with TestClient(app) as test_client:
         yield test_client
     Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture()
+def db_session(client):
+    from promptpilot_backend.db import SessionLocal
+
+    with SessionLocal() as db:
+        yield db

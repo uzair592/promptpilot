@@ -332,3 +332,23 @@ class PromptVersion(Base):
     fallback_used: Mapped[bool] = mapped_column(nullable=False, default=False)
     metadata_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ModelRun(Base):
+    __tablename__ = "model_runs"
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    prompt_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("prompt_versions.id", ondelete="SET NULL"), index=True)
+    source_message_id: Mapped[UUID] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+    execution_strategy: Mapped[str] = mapped_column(String(20), nullable=False)
+    optimized_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    response_text: Mapped[str | None] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    finish_reason: Mapped[str | None] = mapped_column(String(80))
+    usage_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

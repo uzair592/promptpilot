@@ -4,6 +4,8 @@ The implemented FYP core follows:
 
 `USER INTENT -> ANALYSIS -> QUESTIONS -> ANSWERS -> MEMORY -> RETRIEVAL -> CONTEXT ASSEMBLY -> PROMPT GENERATION -> PROMPT VERSION`
 
+Execution extends the flow to `PROMPT VERSION -> LLM EXECUTION -> MODEL RUN`.
+
 Prompt generation is the first stage that turns assembled project context into an
 executable optimized prompt. Autonomous coding, deployment, agents, evaluation,
 embeddings, and vector search remain future startup capabilities.

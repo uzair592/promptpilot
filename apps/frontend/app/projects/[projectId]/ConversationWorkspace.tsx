@@ -32,10 +32,22 @@ export function ConversationWorkspace({
   const [analyzing, setAnalyzing] = useState<string | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const [generationMode, setGenerationMode] = useState("structured");
+  const [runs, setRuns] = useState<
+    Record<
+      string,
+      {
+        response_text: string | null;
+        execution_strategy: string;
+        model: string;
+        latency_ms: number | null;
+      }
+    >
+  >({});
   const [generated, setGenerated] = useState<
     Record<
       string,
       {
+        version_id: string;
         optimized_prompt: string;
         original_prompt: string;
         task_summary: string;
@@ -131,6 +143,26 @@ export function ConversationWorkspace({
       setError("Prompt generation could not be completed.");
     } finally {
       setGenerating(null);
+    }
+  }
+  async function execute(
+    message: Message,
+    strategy: "baseline" | "promptpilot",
+  ) {
+    const versionId = generated[message.id]?.version_id;
+    if (!versionId) return;
+    const response = await fetch(
+      `${apiBaseUrl}/api/v1/conversations/${selected?.id}/prompts/${versionId}/execute`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy, message_id: message.id }),
+      },
+    );
+    if (response.ok) {
+      const run = await response.json();
+      setRuns((items) => ({ ...items, [`${message.id}-${strategy}`]: run }));
     }
   }
   if (loading) return <p className="muted">Loading conversations...</p>;
@@ -268,6 +300,34 @@ export function ConversationWorkspace({
                         >
                           Copy optimized prompt
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => execute(message, "baseline")}
+                        >
+                          Execute baseline
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => execute(message, "promptpilot")}
+                        >
+                          Execute PromptPilot
+                        </button>
+                        {(["baseline", "promptpilot"] as const).map(
+                          (strategy) =>
+                            runs[`${message.id}-${strategy}`] && (
+                              <p key={strategy}>
+                                <b>{strategy}</b>:{" "}
+                                {
+                                  runs[`${message.id}-${strategy}`]
+                                    .response_text
+                                }{" "}
+                                ({runs[`${message.id}-${strategy}`].model},{" "}
+                                {runs[`${message.id}-${strategy}`].latency_ms ??
+                                  "-"}{" "}
+                                ms)
+                              </p>
+                            ),
+                        )}
                       </div>
                     )}
                   </article>

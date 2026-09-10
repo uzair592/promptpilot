@@ -326,3 +326,26 @@ class PromptGenerationResponse(BaseModel):
     quality_notes: list[str]
     warnings: list[str]
     generation_metadata: dict[str, object]
+
+
+class ExecutePromptRequest(BaseModel):
+    strategy: str = Field(pattern="^(baseline|promptpilot)$")
+    message_id: UUID | None = None
+    system_instruction: str | None = Field(default=None, max_length=10000)
+    parameters: dict[str, float | int | str | bool] = {}
+
+
+class ModelRunResponse(BaseModel):
+    id: UUID
+    prompt_version_id: UUID | None
+    execution_strategy: str
+    optimized_prompt: str
+    response_text: str | None
+    provider: str
+    model: str
+    status: str
+    finish_reason: str | None
+    usage: dict[str, object]
+    latency_ms: int | None
+    error_message: str | None
+    created_at: datetime
