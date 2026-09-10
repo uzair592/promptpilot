@@ -42,7 +42,7 @@ class BasicDocumentParser(DocumentParser):
         if extension == ".csv":
             rows = list(csv.reader(io.StringIO(content.decode("utf-8-sig", errors="strict"))))
             return [
-                ParsedContent("\n".join(", ".join(row) for row in rows), "rows 1-%d" % len(rows))
+                ParsedContent("\n".join(", ".join(row) for row in rows), f"rows 1-{len(rows)}")
             ]
         if extension in {".png", ".jpg", ".jpeg"}:
             return []

@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from .analysis_routes import router as analysis_router
 from .config import get_settings
+from .context_routes import router as context_router
 from .conversation_routes import conversation_router
 from .conversation_routes import project_router as conversation_project_router
 from .db import Base, engine
@@ -51,3 +52,4 @@ app.include_router(analysis_router)
 app.include_router(question_router)
 app.include_router(memory_router)
 app.include_router(document_router)
+app.include_router(context_router)

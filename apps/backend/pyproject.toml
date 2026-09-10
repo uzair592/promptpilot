@@ -53,6 +53,8 @@ ignore = ["B008"]
 "src/promptpilot_backend/memory_routes.py" = ["E501"]
 "src/promptpilot_backend/document_routes.py" = ["E501"]
 "src/promptpilot_backend/document_service.py" = ["E501"]
+"src/promptpilot_backend/context_engine.py" = ["E501"]
+"src/promptpilot_backend/context_routes.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"

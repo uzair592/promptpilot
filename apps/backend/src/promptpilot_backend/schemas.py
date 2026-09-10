@@ -261,6 +261,34 @@ class DocumentResponse(BaseModel):
     updated_at: datetime
 
 
+class ContextAssembleRequest(BaseModel):
+    task: str = Field(min_length=1, max_length=10000)
+    top_k: int = Field(default=5, ge=1, le=50)
+    budget: int = Field(default=8000, ge=500, le=100000)
+
+
+class RetrievedContextResponse(BaseModel):
+    content: str
+    score: float
+    source_type: str
+    document_id: UUID | None
+    chunk_id: UUID | None
+    provenance: str
+    metadata: dict[str, str]
+
+
+class ContextPackageResponse(BaseModel):
+    task: str
+    project_memory: list[dict[str, str]]
+    user_answers: list[dict[str, str]]
+    document_context: list[RetrievedContextResponse]
+    requirements: list[str]
+    constraints: list[str]
+    sources: list[dict[str, str]]
+    omitted_count: int
+    budget: int
+
+
 class QuestionSessionResponse(BaseModel):
     id: UUID
     status: str
