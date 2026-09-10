@@ -20,6 +20,10 @@ class Settings:
     llm_timeout: float = float(os.getenv("LLM_TIMEOUT", "30"))
     max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
     storage_path: str = os.getenv("STORAGE_PATH", "./storage")
+    url_connect_timeout: float = float(os.getenv("URL_CONNECT_TIMEOUT", "5"))
+    url_read_timeout: float = float(os.getenv("URL_READ_TIMEOUT", "15"))
+    url_max_response_bytes: int = int(os.getenv("URL_MAX_RESPONSE_BYTES", str(5 * 1024 * 1024)))
+    url_max_redirects: int = int(os.getenv("URL_MAX_REDIRECTS", "3"))
 
 
 @lru_cache

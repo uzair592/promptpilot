@@ -6,10 +6,10 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from .dependencies import current_user
-from .document_service import DocumentService
+from .document_service import DocumentService, UrlIngestionService
 from .models import Document, User
 from .project_policy import ProjectRole, require_project_access
-from .schemas import DocumentResponse
+from .schemas import DocumentResponse, UrlIngestRequest
 
 router = APIRouter(prefix="/api/v1/projects/{project_id}/documents", tags=["documents"])
 
@@ -48,3 +48,18 @@ def list_documents(
             .order_by(Document.created_at.desc())
         ).all()
     ]
+
+
+@router.post("/url", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
+def ingest_url(
+    project_id: UUID,
+    payload: UrlIngestRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> DocumentResponse:
+    require_project_access(db, project_id, user.id, ProjectRole.EDITOR)
+    try:
+        document = UrlIngestionService().ingest_url(db, project_id, payload.url)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    return DocumentResponse.model_validate(document)

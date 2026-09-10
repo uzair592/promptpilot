@@ -252,6 +252,7 @@ class DocumentResponse(BaseModel):
     name: str
     media_type: str
     source_type: str
+    source_url: str | None
     size_bytes: int
     checksum: str
     status: str
@@ -259,6 +260,10 @@ class DocumentResponse(BaseModel):
     processing_version: str
     created_at: datetime
     updated_at: datetime
+
+
+class UrlIngestRequest(BaseModel):
+    url: str = Field(min_length=8, max_length=2048)
 
 
 class ContextAssembleRequest(BaseModel):

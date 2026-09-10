@@ -1,5 +1,9 @@
 # Context Assembly
 
+URL ingestion is isolated behind HTTP/HTTPS validation, DNS/IP private-network
+rejection, redirect revalidation, bounded response size, and connect/read timeouts.
+HTML is parsed without executing JavaScript.
+
 The assembler accepts a typed `ContextAssemblyInput` containing the project, task,
 optional conversation/message/analysis identifiers, retrieval limit, budget, and
 filters. It creates one deterministic candidate set from relevant active memory,

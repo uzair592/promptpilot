@@ -26,6 +26,8 @@ export function ContextPreview({ projectId }: { projectId: string }) {
   const [result, setResult] = useState<Package | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [url, setUrl] = useState("");
+  const [urlStatus, setUrlStatus] = useState("");
 
   async function assemble() {
     if (!task.trim()) return;
@@ -47,6 +49,26 @@ export function ContextPreview({ projectId }: { projectId: string }) {
       setError("Context preview could not be loaded.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function addUrl() {
+    setUrlStatus("");
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/v1/projects/${projectId}/documents/url`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: url.trim() }),
+        },
+      );
+      if (!response.ok) throw new Error("URL ingestion failed");
+      setUrlStatus("URL accepted for processing.");
+      setUrl("");
+    } catch {
+      setUrlStatus("URL could not be ingested.");
     }
   }
 
@@ -79,6 +101,18 @@ export function ContextPreview({ projectId }: { projectId: string }) {
             {result.used_budget}/{result.budget} characters
           </small>
         )}
+      </div>
+      <div className="row">
+        <input
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="Add a public http(s) URL..."
+          type="url"
+        />
+        <button onClick={addUrl} disabled={!url.trim()}>
+          Add URL
+        </button>
+        {urlStatus && <small className="muted">{urlStatus}</small>}
       </div>
       <div className="row">
         <input
