@@ -263,6 +263,9 @@ class DocumentResponse(BaseModel):
 
 class ContextAssembleRequest(BaseModel):
     task: str = Field(min_length=1, max_length=10000)
+    conversation_id: UUID | None = None
+    message_id: UUID | None = None
+    analysis_id: UUID | None = None
     top_k: int = Field(default=5, ge=1, le=50)
     budget: int = Field(default=8000, ge=500, le=100000)
 
@@ -282,11 +285,12 @@ class ContextPackageResponse(BaseModel):
     project_memory: list[dict[str, str]]
     user_answers: list[dict[str, str]]
     document_context: list[RetrievedContextResponse]
-    requirements: list[str]
-    constraints: list[str]
+    requirements: list[dict[str, str]]
+    constraints: list[dict[str, str]]
     sources: list[dict[str, str]]
-    omitted_count: int
+    omitted_items: list[dict[str, str]]
     budget: int
+    used_budget: int
 
 
 class QuestionSessionResponse(BaseModel):
