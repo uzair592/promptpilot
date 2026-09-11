@@ -203,8 +203,7 @@ def _instruction_score(task: str, constraints: list[str], response: str) -> tupl
     score = round(sum(scores) / len(scores))
     return (
         score,
-        f"Followed {len(scores) - violated} of {len(scores)} "
-        "explicit output instructions.",
+        f"Followed {len(scores) - violated} of {len(scores)} explicit output instructions.",
     )
 
 
@@ -228,17 +227,13 @@ def heuristic_score(
     context_texts = _item_texts(context)
 
     relevance = (
-        100
-        if not task_tokens
-        else max(0, round(100 * len(task_overlap) / len(task_tokens)))
+        100 if not task_tokens else max(0, round(100 * len(task_overlap) / len(task_tokens)))
     )
     requirement_scores = [
         _item_score(item, response, response_tokens) for item in requirement_texts
     ]
     completeness = (
-        round(sum(requirement_scores) / len(requirement_scores))
-        if requirement_scores
-        else 100
+        round(sum(requirement_scores) / len(requirement_scores)) if requirement_scores else 100
     )
     instruction_following, instruction_explanation = _instruction_score(
         task, constraint_texts, response
@@ -408,8 +403,10 @@ class ResponseEvaluationService:
         other_run: ModelRun | None = None,
     ) -> tuple[str, dict[str, Any]]:
         source_message = db.get(Message, run.source_message_id)
-        task_text = original_task or task or (
-            source_message.content if source_message else run.optimized_prompt
+        task_text = (
+            original_task
+            or task
+            or (source_message.content if source_message else run.optimized_prompt)
         )
         promptpilot_prompt = (
             run.optimized_prompt if run.execution_strategy == "promptpilot" else None
@@ -433,10 +430,16 @@ class ResponseEvaluationService:
     def _judge(
         self, task: str, response_a: str, response_b: str, evidence: dict[str, Any]
     ) -> tuple[EvaluationResult, EvaluationResult]:
-        evidence["response_a"] = response_a
-        evidence["response_b"] = response_b
+        judge_evidence = {
+            "task": task,
+            "requirements": evidence.get("requirements", []),
+            "constraints": evidence.get("constraints", []),
+            "context": evidence.get("context", []),
+            "response_a": response_a,
+            "response_b": response_b,
+        }
         output = self.judge_provider.judge_response(
-            task, response_a, response_b, evidence=evidence
+            task, response_a, response_b, evidence=judge_evidence
         )
         output = LLMJudgeOutput.model_validate(output)
         return (

@@ -244,7 +244,7 @@ class CapturingJudge:
         )
 
 
-def test_llm_judge_evidence_is_exact_and_neutral_mapping_is_preserved(client):
+def test_llm_judge_payload_is_blind_and_audit_evidence_is_preserved(client):
     project_id, conversation_id = register_and_conversation(client)
     baseline_id, promptpilot_id = create_runs(project_id, conversation_id)
     judge = CapturingJudge()
@@ -270,30 +270,34 @@ def test_llm_judge_evidence_is_exact_and_neutral_mapping_is_preserved(client):
     assert response_a.startswith("In Pakistan")
     assert response_b.startswith("Aluminium foil")
     assert evidence == {
-        "original_task": "Original research task.",
-        "baseline_executed_prompt": "Explain how aluminium foil is used in Pakistan.",
-        "optimized_prompt": (
-            "Explain how aluminium foil is used in Pakistan. "
-            "Include practical Pakistani household and packaging examples."
-        ),
+        "task": "Original research task.",
         "requirements": ["include sources"],
         "constraints": ["be concise"],
         "context": ["Pakistan"],
         "response_a": response_a,
         "response_b": response_b,
     }
+    assert "baseline_executed_prompt" not in evidence
+    assert "optimized_prompt" not in evidence
     assert evaluation.rubric_version == "v1"
     assert evaluation.baseline_score == 90
     assert evaluation.promptpilot_score == 10
+    audit_evidence = json.loads(evaluation.metadata_json)
+    assert audit_evidence["baseline_executed_prompt"] == (
+        "Explain how aluminium foil is used in Pakistan."
+    )
+    assert audit_evidence["optimized_prompt"].startswith(
+        "Explain how aluminium foil is used in Pakistan."
+    )
 
 
-def test_llm_judge_assignment_swap_maps_scores_back_to_strategies(client):
+def test_llm_judge_assignment_directions_map_scores_back_to_strategies(client):
     project_id, conversation_id = register_and_conversation(client)
     baseline_id, promptpilot_id = create_runs(project_id, conversation_id)
 
-    for assignment, expected_baseline, expected_promptpilot in (
-        (lambda: True, 10, 90),
-        (lambda: False, 90, 10),
+    for assignment, expected_first, expected_second, expected_baseline, expected_promptpilot in (
+        (lambda: True, "Aluminium foil", "In Pakistan", 10, 90),
+        (lambda: False, "In Pakistan", "Aluminium foil", 90, 10),
     ):
         judge = CapturingJudge()
         with SessionLocal() as db:
@@ -309,6 +313,17 @@ def test_llm_judge_assignment_swap_maps_scores_back_to_strategies(client):
             )
         assert evaluation.baseline_score == expected_baseline
         assert evaluation.promptpilot_score == expected_promptpilot
+        _, response_a, response_b, evidence = judge.calls[0]
+        assert response_a.startswith(expected_first)
+        assert response_b.startswith(expected_second)
+        assert set(evidence) == {
+            "task",
+            "requirements",
+            "constraints",
+            "context",
+            "response_a",
+            "response_b",
+        }
 
 
 class InvalidJudge:
@@ -427,9 +442,6 @@ def test_provider_payload_contains_neutral_responses_and_structured_evidence(mon
     provider.api_key = "test-key"
     provider.timeout = 3
     evidence = {
-        "original_task": "Original task",
-        "baseline_executed_prompt": "Original task",
-        "optimized_prompt": "Optimized task",
         "requirements": ["requirement"],
         "constraints": ["constraint"],
         "context": ["known fact"],
@@ -439,13 +451,44 @@ def test_provider_payload_contains_neutral_responses_and_structured_evidence(mon
 
     messages = captured["body"]["messages"]
     user_payload = json.loads(messages[1]["content"])
+    assert set(user_payload) == {
+        "task",
+        "requirements",
+        "constraints",
+        "context",
+        "response_a",
+        "response_b",
+    }
     assert user_payload == {
         "task": "Original task",
+        "requirements": ["requirement"],
+        "constraints": ["constraint"],
+        "context": ["known fact"],
         "response_a": "Response A",
         "response_b": "Response B",
-        "evidence": evidence,
     }
+    serialized_user_payload = messages[1]["content"]
+    for forbidden in (
+        "baseline_executed_prompt",
+        "optimized_prompt",
+        "baseline_response",
+        "promptpilot_response",
+        "baseline_model_run_id",
+        "promptpilot_model_run_id",
+        "execution_strategy",
+        "provider",
+        "evidence",
+        "baseline",
+        "promptpilot",
+    ):
+        assert forbidden not in serialized_user_payload.lower()
     system_prompt = messages[0]["content"].lower()
     assert "response a" in system_prompt and "response b" in system_prompt
-    for forbidden in ("baseline", "promptpilot", "improved", "optimized system"):
+    for forbidden in (
+        "baseline",
+        "promptpilot",
+        "improved",
+        "optimized",
+        "system produced",
+    ):
         assert forbidden not in system_prompt
