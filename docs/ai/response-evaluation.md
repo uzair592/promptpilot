@@ -30,3 +30,10 @@ labels. Paired runs must share project, conversation, and source task and both
 must have succeeded. Evaluator metadata retains the original task, executed
 prompts, responses, requirements, constraints, and context. Results are
 persisted for history and are available from the conversation workspace.
+
+The heuristic evaluator is a deterministic baseline approximation, not a
+human-level semantic or factual judge. It uses lexical coverage, explicit
+requirement and constraint checks, simple supplied-context contradiction
+patterns, and basic readability signals. Missing requirements or context are
+not fabricated; the corresponding dimensions are reported as having no
+additional evidence rather than inferred from response length.

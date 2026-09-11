@@ -6,7 +6,7 @@ import json
 import re
 import secrets
 from collections.abc import Callable
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .llm_provider import OpenAICompatibleProvider
-from .models import Evaluation, EvaluationItem, Message, ModelRun, PromptVersion
+from .models import Evaluation, EvaluationItem, Message, ModelRun
 from .schemas import (
     EVALUATION_DIMENSIONS,
     LLMJudgeOutput,
@@ -24,8 +24,20 @@ from .schemas import (
     EVALUATION_WEIGHTS as SCHEMA_EVALUATION_WEIGHTS,
 )
 
-RUBRIC_VERSION = "response-evaluation-v1"
+RUBRIC_VERSION = "v1"
 EVALUATION_WEIGHTS: dict[str, int] = SCHEMA_EVALUATION_WEIGHTS
+TASK_INSTRUCTION_WORDS = {
+    "answer",
+    "describe",
+    "explain",
+    "give",
+    "list",
+    "please",
+    "provide",
+    "summarize",
+    "tell",
+    "write",
+}
 
 
 class EvaluationResult(BaseModel):
@@ -51,9 +63,10 @@ def weighted_aggregate(score: ResponseScore) -> float:
 
     return round(
         sum(
-            cast(int, getattr(score, dimension)) * EVALUATION_WEIGHTS[dimension] / 100
+            int(getattr(score, dimension)) * EVALUATION_WEIGHTS[dimension]
             for dimension in EVALUATION_DIMENSIONS
-        ),
+        )
+        / 100,
         2,
     )
 
@@ -69,6 +82,132 @@ def _text_values(values: list[dict[str, object] | str]) -> str:
     )
 
 
+def _item_texts(values: list[dict[str, object] | str]) -> list[str]:
+    return [
+        value if isinstance(value, str) else " ".join(str(item) for item in value.values())
+        for value in values
+    ]
+
+
+def _coverage(target: str, response_tokens: set[str]) -> tuple[int, int]:
+    target_tokens = _tokens(target)
+    if not target_tokens:
+        return 0, 0
+    return len(target_tokens & response_tokens), len(target_tokens)
+
+
+def _is_negated(response: str, phrase: str) -> bool:
+    """Detect an explicit negation of a supplied fact or instruction."""
+
+    normalized = " ".join(phrase.lower().split())
+    if not normalized:
+        return False
+    escaped = re.escape(normalized)
+    return bool(
+        re.search(
+            rf"\b(?:not|no|never|without|isn't|aren't|doesn't|don't|can't|cannot)\b"
+            rf"(?:\W+\w+){{0,3}}\W+{escaped}\b",
+            response.lower(),
+        )
+    )
+
+
+def _is_contradicted(response: str, phrase: str) -> bool:
+    """Detect a response that explicitly negates a supplied fact."""
+
+    fact = re.search(r"(.+?)\b(?:is|are|was|were|equals?)\b\s+(.+)", phrase.lower())
+    if not fact:
+        return _is_negated(response, phrase)
+    prefix = " ".join(re.findall(r"[a-z0-9]+", fact.group(1)))
+    value = " ".join(re.findall(r"[a-z0-9]+", fact.group(2)))
+    if not prefix or not value:
+        return _is_negated(response, phrase)
+    return bool(
+        re.search(
+            rf"\b{re.escape(prefix)}\b(?:\W+\w+){{0,3}}\W+"
+            rf"(?:not|no|never|isn't|aren't|wasn't|weren't)\b"
+            rf"(?:\W+\w+){{0,2}}\W+{re.escape(value)}\b",
+            response.lower(),
+        )
+    )
+
+
+def _item_score(target: str, response: str, response_tokens: set[str]) -> int:
+    matched, total = _coverage(target, response_tokens)
+    if not total:
+        return 100
+    if _is_contradicted(response, target):
+        return 0
+    return round(100 * matched / total)
+
+
+def _instruction_score(task: str, constraints: list[str], response: str) -> tuple[int, str]:
+    """Score explicit constraints and output instructions independently of relevance."""
+
+    instruction_items = list(constraints)
+    lowered_task = task.lower()
+    format_match = re.search(r"\b(?:json|yaml|xml)\b", lowered_task)
+    if format_match:
+        instruction_items.append("return " + format_match.group(0))
+    output_match = re.search(
+        r"\b(?:bullet points?|numbered list|table|one sentence|paragraph)\b",
+        lowered_task,
+    )
+    if output_match:
+        instruction_items.append(output_match.group(0))
+
+    if not instruction_items:
+        return 100, "No explicit output constraints were supplied."
+    if not response.strip():
+        return 0, "Response is empty and cannot follow output instructions."
+
+    response_tokens = _tokens(response)
+    scores: list[int] = []
+    violated = 0
+    for item in instruction_items:
+        item_lower = item.lower()
+        forbidden = re.search(
+            r"\b(?:do not|don't|must not|never|avoid|without)\s+(.+)",
+            item_lower,
+        )
+        if forbidden:
+            forbidden_tokens = _tokens(forbidden.group(1))
+            item_score = 0 if forbidden_tokens & response_tokens else 100
+        elif "bullet point" in item_lower:
+            item_score = 100 if len(re.findall(r"(?m)^\s*[-*]\s+", response)) >= 2 else 0
+        elif "numbered list" in item_lower:
+            item_score = 100 if len(re.findall(r"(?m)^\s*\d+[.)]\s+", response)) >= 2 else 0
+        elif "table" in item_lower:
+            item_score = 100 if "|" in response and re.search(r"\|?\s*:?-{3,}", response) else 0
+        elif "one sentence" in item_lower:
+            item_score = 100 if len(re.findall(r"[.!?](?:\s|$)", response.strip())) <= 1 else 0
+        elif "concise" in item_lower:
+            item_score = 100 if len(response.split()) <= 100 else 0
+        else:
+            item_score = _item_score(item, response, response_tokens)
+        if re.search(r"\b(?:json|yaml|xml)\b", item_lower):
+            try:
+                json.loads(response)
+                item_score = 100
+            except json.JSONDecodeError:
+                item_score = 0
+        word_limit = re.search(
+            r"\b(?:under|below|at most|no more than)\s+(\d+)\s+words?\b",
+            item_lower,
+        )
+        if word_limit and len(response.split()) > int(word_limit.group(1)):
+            item_score = 0
+        if item_score == 0:
+            violated += 1
+        scores.append(item_score)
+    score = round(sum(scores) / len(scores))
+    return (
+        score,
+        f"Followed {len(scores) - violated} of {len(scores)} "
+        "explicit output instructions.",
+    )
+
+
 def heuristic_score(
     task: str,
     response: str,
@@ -81,44 +220,32 @@ def heuristic_score(
     requirements = requirements or []
     constraints = constraints or []
     context = context or []
-    task_tokens = _tokens(task)
+    task_tokens = _tokens(task) - TASK_INSTRUCTION_WORDS
     response_tokens = _tokens(response)
     task_overlap = task_tokens & response_tokens
-    requirement_tokens = _tokens(_text_values(requirements))
-    constraint_tokens = _tokens(_text_values(constraints))
-    context_tokens = _tokens(_text_values(context))
+    requirement_texts = _item_texts(requirements)
+    constraint_texts = _item_texts(constraints)
+    context_texts = _item_texts(context)
 
     relevance = (
         100
         if not task_tokens
         else max(0, round(100 * len(task_overlap) / len(task_tokens)))
     )
-    completeness_target = requirement_tokens or task_tokens
+    requirement_scores = [
+        _item_score(item, response, response_tokens) for item in requirement_texts
+    ]
     completeness = (
-        100
-        if not completeness_target
-        else max(
-            0,
-            round(100 * len(completeness_target & response_tokens) / len(completeness_target)),
-        )
+        round(sum(requirement_scores) / len(requirement_scores))
+        if requirement_scores
+        else 100
     )
-    instruction_target = constraint_tokens | {
-        token
-        for token in task_tokens
-        if token not in {"please", "write", "provide", "explain", "describe", "tell"}
-    }
-    instruction_following = (
-        100
-        if not instruction_target
-        else max(
-            0,
-            round(100 * len(instruction_target & response_tokens) / len(instruction_target)),
-        )
+    instruction_following, instruction_explanation = _instruction_score(
+        task, constraint_texts, response
     )
+    context_scores = [_item_score(item, response, response_tokens) for item in context_texts]
     contextual_grounding = (
-        100
-        if not context_tokens
-        else max(0, round(100 * len(context_tokens & response_tokens) / len(context_tokens)))
+        round(sum(context_scores) / len(context_scores)) if context_scores else 100
     )
 
     stripped = response.strip()
@@ -135,20 +262,17 @@ def heuristic_score(
     explanations = {
         "relevance": f"Matched {len(task_overlap)} of {len(task_tokens)} task terms.",
         "completeness": (
-            f"Covered {len(completeness_target & response_tokens)} of "
-            f"{len(completeness_target)} requirement terms."
+            "No explicit requirements were supplied."
+            if not requirement_texts
+            else f"Covered {sum(score == 100 for score in requirement_scores)} of "
+            f"{len(requirement_scores)} explicit requirements."
         ),
-        "instruction_following": (
-            f"Covered {len(instruction_target & response_tokens)} of "
-            f"{len(instruction_target)} instruction terms."
-        ),
+        "instruction_following": instruction_explanation,
         "contextual_grounding": (
             "No additional context was supplied."
-            if not context_tokens
-            else (
-                f"Matched {len(context_tokens & response_tokens)} of "
-                f"{len(context_tokens)} context terms."
-            )
+            if not context_texts
+            else f"Grounded {sum(score == 100 for score in context_scores)} of "
+            f"{len(context_scores)} supplied context items."
         ),
         "clarity": (
             "Response is empty."
@@ -183,6 +307,36 @@ def _json_list(value: str | None) -> list[str]:
     except json.JSONDecodeError:
         return [value]
     return [str(item) for item in parsed] if isinstance(parsed, list) else [str(parsed)]
+
+
+def _generation_parameters(run: ModelRun) -> dict[str, object] | None:
+    """Read optional comparable generation parameters without treating usage as parameters."""
+
+    for attribute in ("generation_parameters", "parameters"):
+        value = getattr(run, attribute, None)
+        if isinstance(value, dict):
+            return value
+    try:
+        metadata = json.loads(run.usage_json)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    for key in ("generation_parameters", "parameters"):
+        value = metadata.get(key)
+        if isinstance(value, dict):
+            return value
+    comparable_keys = {
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "seed",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+    }
+    comparable = {key: metadata[key] for key in comparable_keys if key in metadata}
+    return comparable or None
 
 
 def _strengths_and_weaknesses(result: EvaluationResult) -> tuple[list[str], list[str]]:
@@ -232,6 +386,14 @@ class ResponseEvaluationService:
             raise ValueError("Paired runs must share project and source task")
         if baseline.provider != promptpilot.provider or baseline.model != promptpilot.model:
             raise ValueError("Paired runs must use the same target provider and model")
+        baseline_parameters = _generation_parameters(baseline)
+        promptpilot_parameters = _generation_parameters(promptpilot)
+        if (
+            baseline_parameters is not None
+            and promptpilot_parameters is not None
+            and baseline_parameters != promptpilot_parameters
+        ):
+            raise ValueError("Paired runs must use comparable generation parameters")
         return baseline, promptpilot
 
     @staticmethod
@@ -249,61 +411,33 @@ class ResponseEvaluationService:
         task_text = original_task or task or (
             source_message.content if source_message else run.optimized_prompt
         )
-        version_metadata: dict[str, Any] = {}
-        if run.prompt_version_id:
-            version = db.get(PromptVersion, run.prompt_version_id)
-            if version:
-                try:
-                    version_metadata = json.loads(version.metadata_json)
-                except json.JSONDecodeError:
-                    version_metadata = {}
+        promptpilot_prompt = (
+            run.optimized_prompt if run.execution_strategy == "promptpilot" else None
+        )
+        baseline_prompt = run.optimized_prompt if run.execution_strategy == "baseline" else None
+        if other_run:
+            if other_run.execution_strategy == "baseline":
+                baseline_prompt = other_run.optimized_prompt
+            elif other_run.execution_strategy == "promptpilot":
+                promptpilot_prompt = other_run.optimized_prompt
         evidence: dict[str, Any] = {
             "original_task": task_text,
-            "baseline_executed_prompt": run.optimized_prompt
-            if run.execution_strategy == "baseline"
-            else (
-                other_run.optimized_prompt
-                if other_run and other_run.execution_strategy == "baseline"
-                else None
-            ),
-            "optimized_prompt": run.optimized_prompt
-            if run.execution_strategy == "promptpilot"
-            else (
-                other_run.optimized_prompt
-                if other_run and other_run.execution_strategy == "promptpilot"
-                else None
-            ),
-            "baseline_response": run.response_text
-            if run.execution_strategy == "baseline"
-            else (
-                other_run.response_text
-                if other_run and other_run.execution_strategy == "baseline"
-                else None
-            ),
-            "promptpilot_response": run.response_text
-            if run.execution_strategy == "promptpilot"
-            else (
-                other_run.response_text
-                if other_run and other_run.execution_strategy == "promptpilot"
-                else None
-            ),
+            "baseline_executed_prompt": baseline_prompt,
+            "optimized_prompt": promptpilot_prompt,
             "requirements": requirements,
             "constraints": constraints,
             "context": context,
-            "prompt_version_metadata": version_metadata,
         }
         return task_text, evidence
 
     def _judge(
         self, task: str, response_a: str, response_b: str, evidence: dict[str, Any]
     ) -> tuple[EvaluationResult, EvaluationResult]:
-        try:
-            output = self.judge_provider.judge_response(
-                task, response_a, response_b, evidence=evidence
-            )
-        except TypeError:
-            # Keep the provider abstraction compatible with small test providers.
-            output = self.judge_provider.judge_response(task, response_a, response_b)
+        evidence["response_a"] = response_a
+        evidence["response_b"] = response_b
+        output = self.judge_provider.judge_response(
+            task, response_a, response_b, evidence=evidence
+        )
         output = LLMJudgeOutput.model_validate(output)
         return (
             EvaluationResult(
@@ -353,6 +487,8 @@ class ResponseEvaluationService:
         task_text, evidence = self._task_and_evidence(
             db, run, task, original_task, requirements, constraints, context
         )
+        evidence["response_a"] = run.response_text or ""
+        evidence["response_b"] = ""
         result, _ = self._results(
             method,
             task_text,
@@ -427,6 +563,8 @@ class ResponseEvaluationService:
         task_text, evidence = self._task_and_evidence(
             db, baseline, task, original_task, requirements, constraints, context, promptpilot
         )
+        evidence["response_a"] = baseline.response_text or ""
+        evidence["response_b"] = promptpilot.response_text or ""
         if method == "llm_judge":
             first, second = (
                 (baseline, promptpilot) if self.assignment() else (promptpilot, baseline)
