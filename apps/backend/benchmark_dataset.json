@@ -1,0 +1,102 @@
+{
+  "schema_version": "v1",
+  "name": "promptpilot-experimental-v1",
+  "tasks": [
+    {
+      "task_id": "writing-email-001",
+      "task_text": "Write a professional email asking a supplier to confirm a delayed delivery.",
+      "objective": "Obtain a clear delivery update while preserving the business relationship.",
+      "requirements": ["Ask for the revised delivery date", "Request an explanation for the delay"],
+      "constraints": ["Use a professional tone", "Keep the email under 150 words"],
+      "expected_output_characteristics": ["Subject line", "Concise greeting and closing", "Clear call to action"],
+      "available_context": ["The recipient is an existing supplier", "The original delivery is already late"],
+      "category": "writing",
+      "difficulty": "easy",
+      "reference": null
+    },
+    {
+      "task_id": "summarization-policy-001",
+      "task_text": "Summarize a short workplace policy for a new employee.",
+      "objective": "Make the policy understandable without losing its operational requirements.",
+      "requirements": ["Identify the main rule", "Include the escalation path"],
+      "constraints": ["Use plain language", "Use bullet points"],
+      "expected_output_characteristics": ["Accurate coverage of key actions", "Skimmable structure"],
+      "available_context": ["The audience has no prior knowledge of the policy"],
+      "category": "summarization",
+      "difficulty": "medium",
+      "reference": null
+    },
+    {
+      "task_id": "qa-geography-001",
+      "task_text": "Explain why coastal cities often have milder temperatures than inland cities at the same latitude.",
+      "objective": "Provide a clear causal explanation for a general audience.",
+      "requirements": ["Explain the role of water", "Mention seasonal effects"],
+      "constraints": ["Avoid unexplained technical jargon"],
+      "expected_output_characteristics": ["Causal chain", "Concrete comparison"],
+      "available_context": [],
+      "category": "question_answering",
+      "difficulty": "easy",
+      "reference": null
+    },
+    {
+      "task_id": "extraction-invoice-001",
+      "task_text": "Extract the invoice number, due date, and total amount from the supplied invoice text.",
+      "objective": "Return the requested fields in a machine-readable structure.",
+      "requirements": ["Include all three requested fields"],
+      "constraints": ["Return valid JSON only", "Do not add fields that are not present"],
+      "expected_output_characteristics": ["Stable field names", "No surrounding prose"],
+      "available_context": ["The source may contain currency symbols and localized dates"],
+      "category": "extraction",
+      "difficulty": "medium",
+      "reference": null
+    },
+    {
+      "task_id": "planning-launch-001",
+      "task_text": "Create a practical plan for launching a small community workshop.",
+      "objective": "Turn the goal into an ordered plan that can be executed by a small team.",
+      "requirements": ["Include preparation, promotion, delivery, and follow-up"],
+      "constraints": ["Identify dependencies", "Call out major risks"],
+      "expected_output_characteristics": ["Ordered phases", "Owners or roles", "Risk mitigations"],
+      "available_context": ["The team has limited budget and volunteers"],
+      "category": "planning",
+      "difficulty": "medium",
+      "reference": null
+    },
+    {
+      "task_id": "technical-api-001",
+      "task_text": "Design a small REST endpoint for creating a project member invitation.",
+      "objective": "Describe an implementable and secure API contract.",
+      "requirements": ["Define request and response fields", "Explain authorization and failure cases"],
+      "constraints": ["Use HTTP semantics consistently", "Do not expose invitation secrets"],
+      "expected_output_characteristics": ["Route and method", "Validation rules", "Security notes"],
+      "available_context": ["The system uses project-scoped roles", "Invitations expire"],
+      "category": "technical_software",
+      "difficulty": "hard",
+      "reference": null
+    },
+    {
+      "task_id": "business-analysis-001",
+      "task_text": "Compare two customer support improvement options for a small business.",
+      "objective": "Support a decision using explicit trade-offs rather than a one-sided recommendation.",
+      "requirements": ["Compare cost, implementation effort, and likely benefit"],
+      "constraints": ["State assumptions", "End with a conditional recommendation"],
+      "expected_output_characteristics": ["Comparison table or equivalent", "Decision criteria"],
+      "available_context": ["The business has a small operations team"],
+      "category": "business_professional",
+      "difficulty": "medium",
+      "reference": null
+    },
+    {
+      "task_id": "research-information-001",
+      "task_text": "Propose a careful research approach for investigating whether a new onboarding guide improves task completion.",
+      "objective": "Define an evidence-producing study without overstating causality.",
+      "requirements": ["Define a comparison condition", "Specify outcomes and limitations"],
+      "constraints": ["Distinguish measurement from interpretation", "Do not invent results"],
+      "expected_output_characteristics": ["Study steps", "Measured variables", "Threats to validity"],
+      "available_context": ["Participants may differ in prior experience"],
+      "category": "research_information",
+      "difficulty": "hard",
+      "reference": null
+    }
+  ]
+}

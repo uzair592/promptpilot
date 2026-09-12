@@ -3,9 +3,9 @@
 Repository state: generated from the current HEAD at documentation time. This document
 describes the live implementation in the repository, not older README status text.
 
-Current phase: Experimental Dataset Preparation. Response Evaluation is
-IMPLEMENTED / RESEARCH-AUDITED, but no validated benchmark dataset or final research
-results exist yet.
+Current phase: Response Evaluation implemented/audited -> Experimental Dataset Preparation.
+The initial dataset and reproducible benchmark harness now exist, but no validated
+benchmark results exist yet.
 
 ## 1. Product Name
 
@@ -77,8 +77,8 @@ five dimensions:
 - Contextual Grounding: 20%
 - Clarity: 15%
 
-The backend owns the deterministic weighted aggregate. The current implementation is
-IMPLEMENTED / RESEARCH-AUDITED, but no validated benchmark dataset or final research
+The backend owns the deterministic weighted aggregate. The evaluator and initial
+benchmark harness are IMPLEMENTED / RESEARCH-AUDITED, but no validated benchmark
 results exist yet.
 
 ## 10. Out of Scope
@@ -101,7 +101,8 @@ results exist yet.
 - Lexical retrieval and context assembly: `ContextAssembler` ranks memory, answers, and document chunks by task relevance and source authority; duplicate content is de-duped before budget packaging
 - Prompt generation and versioning: `PromptGenerationInput` and `PromptVersion` persist optimized prompts with provider/model metadata, generation mode, and source-message provenance.
 - Target execution and `ModelRun`: execution supports `baseline` and `promptpilot` strategies, records provider/model/usage, and stores the selected prompt and output alongside a source message.
-- Response evaluation and audit (IMPLEMENTED / RESEARCH-AUDITED): heuristic evaluator, LLM judge, five dimensions, deterministic weighted aggregate, neutral A/B judging, same-task/source-message and same provider/model validation, persistence, comparison, frontend comparison/history support, and regression tests. No validated benchmark dataset or final research results exist yet.
+- Response evaluation and audit (IMPLEMENTED / RESEARCH-AUDITED): heuristic evaluator, LLM judge, five dimensions, deterministic weighted aggregate, neutral A/B judging, same-task/source-message and same provider/model validation, persistence, comparison, frontend comparison/history support, and regression tests.
+- Experimental benchmark harness: validated JSON dataset schema with stable task IDs, paired baseline/PromptPilot execution, repeated runs, lineage-preserving exports, and integration with `v1` evaluation. No validated benchmark results exist yet.
 - Frontend shell: the Next.js app includes login/register pages, dashboard, project list, project page, conversation workspace, and context preview. It contains the core workspace and implemented controls, while some richer workflow areas remain under development.
 
 ### Implemented API surface
@@ -130,7 +131,7 @@ results exist yet.
 - Complete the remaining workspace UI for prompt generation, requirements/export, and evaluation views.
 - Add richer project-level model recommendation, task routing, and version history.
 - Convert one-off prompt-generation and analysis patterns into stronger domain-specific requirement extraction and acceptance criteria.
-- Prepare a benchmark dataset and human-labelled evaluation data where appropriate for prompt completeness, question quality, retrieval quality, and response quality.
+- Add human-labelled evaluation data and complete controlled benchmark runs for response quality.
 - Add a stricter production schema lifecycle and deployment configuration.
 
 ## FUTURE STARTUP

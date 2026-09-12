@@ -76,7 +76,7 @@ The actual dimension order is defined in `schemas.py` as:
 
 - Add explicit requirement and acceptance-criteria objects with separate lifecycle states.
 - Strengthen policy tests around model selection, access control, and audit completeness.
-- Add a benchmark dataset specification and a human-review process for prompt-analysis and retrieval scoring.
+- Add human-reviewed labels and reporting on top of the benchmark dataset and paired runner.
 - Document the expected migration strategy and production deployment boundary.
 
 ## FUTURE STARTUP
@@ -86,5 +86,5 @@ The actual dimension order is defined in `schemas.py` as:
 - Add agents, Hermes, browser automation, and autonomous coding only after explicit
   approval and appropriate sandboxing.
 - Add prompt-generation guardrails, model risk controls, and cost thresholds.
-- Create a formal evaluation dataset with labeled ground truth and reproducible benchmark runs.
+- Complete the formal evaluation dataset with labeled ground truth and run the reproducible benchmark protocol.
 - Establish production-grade CI/CD, storage, and observability for multi-tenant operations.

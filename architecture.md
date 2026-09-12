@@ -3,8 +3,9 @@
 Repository state: generated from the current HEAD at documentation time. This
 architecture reflects the actual codebase, not historical README status text.
 
-Current phase: Experimental Dataset Preparation. Response Evaluation is IMPLEMENTED /
-RESEARCH-AUDITED, but no validated benchmark dataset or final research results exist.
+Current phase: Response Evaluation implemented/audited -> Experimental Dataset Preparation.
+The initial dataset and reproducible benchmark harness exist, but no validated benchmark
+results exist.
 
 ## IMPLEMENTED
 
@@ -31,6 +32,7 @@ RESEARCH-AUDITED, but no validated benchmark dataset or final research results e
 - `prompt_generation.py`: prompt generation input assembly, provider validation, and persisting `PromptVersion` rows.
 - `execution_service.py`: executes original or optimized prompts and stores `ModelRun` rows.
 - `evaluation_service.py`: deterministic heuristic evaluation plus optional LLM-judge path for response comparison.
+- `benchmark.py`: validated task dataset, isolated paired execution, repeated-run records, and JSON/CSV export.
 
 ### Data model highlights
 
@@ -92,8 +94,7 @@ Important design constraints:
 
 ## NEXT
 
-- Prepare the experimental dataset and human-labelled evaluation data where appropriate.
-- Define reproducible benchmark fixtures and reporting procedures without claiming results in advance.
+- Add human-labelled evaluation data and complete controlled benchmark runs without claiming results in advance.
 
 ## PLANNED
 
@@ -108,4 +109,4 @@ Important design constraints:
 - Add agents, Hermes, autonomous coding, browser automation, and a sandbox boundary for tool execution and code generation.
 - Support multi-project, multi-tenant, and enterprise authorization layers.
 - Move to a full agentic workflow with planning, execution, evaluation, and safe review loops.
-- Package a credible benchmark dataset and final product evaluation story with provenance and human labels.
+- Package the final evaluation story with completed runs, provenance, and human labels.

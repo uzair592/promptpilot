@@ -105,7 +105,7 @@ The actual evaluator is defined in `schemas.py` and enforced in `evaluation_serv
 
 - Add stable requirement objects with explicit lifecycle states and dependency metadata.
 - Add a real model-router service based on task category and performance metadata.
-- Expand the evaluation harness to include a benchmark dataset, human-labeled gold sets, and regression fixtures.
+- Add human-labeled gold sets, controlled benchmark runs, and regression fixtures to the initial benchmark harness.
 - Improve the frontend to show prompt generation, run history, requirement extraction, and evaluation results in one workspace.
 
 ## FUTURE
