@@ -102,6 +102,9 @@ executions, and evaluations.
   research dimensions and weights.
 - Paired evaluation initially lacked source-message matching; same-task/source-message
   validation is now mandatory.
+- The experimental benchmark foundation validates stable task IDs, isolates each
+  repeated task pair in its own project/conversation, preserves model parameters in
+  run metadata, and exports raw records without claiming results.
 
 ## PLANNED
 
@@ -115,4 +118,5 @@ executions, and evaluations.
 - Multi-project semantic memory, retrieval caches, and long-term user state.
 - Policy-aware memory scoping for authorization, compliance, and retention.
 - Full task-graph memory with structured causal/reasoning traces.
-- Persistent, queryable evaluation dataset and memory regressions tied to prompt versions and model runs.
+- Human-labelled evaluation data, controlled run reporting, and memory regressions tied
+  to prompt versions and model runs.

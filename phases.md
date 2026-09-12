@@ -3,9 +3,9 @@
 Repository state: generated from the current HEAD at documentation time. This phase
 record reflects repository reality rather than historical roadmap text.
 
-Current phase: Experimental Dataset Preparation. This repo contains deterministic
-heuristics, optional AI enhancement, and comparison/evaluation tooling, but it does not
-yet include a validated benchmark dataset or final performance claims.
+Current phase: Response Evaluation implemented/audited -> Experimental Dataset Preparation.
+This repo contains an initial validated dataset schema and reproducible paired runner,
+but no validated benchmark results or final performance claims.
 
 ## COMPLETE
 
@@ -52,7 +52,14 @@ yet include a validated benchmark dataset or final performance claims.
 - Deterministic weighted aggregate owned by the backend.
 - Neutral A/B judging, same-task/source-message validation, and same provider/model validation.
 - Evaluation persistence, baseline-vs-PromptPilot comparison, frontend comparison/history support, and regression tests.
-- Status: IMPLEMENTED / RESEARCH-AUDITED. No validated benchmark dataset or final research results exist yet.
+- Status: IMPLEMENTED / RESEARCH-AUDITED. The benchmark foundation now exists, but no validated results exist yet.
+
+### Experimental Dataset + Benchmark Harness
+
+- Initial curated dataset spans eight task categories with stable IDs and structured task facts.
+- `benchmark.py` executes isolated repeated baseline/PromptPilot pairs through the existing provider, model-run, and `v1` evaluation services.
+- JSON and CSV exports preserve task, prompt, context, model parameters, lineage, evaluation, ordering, timestamps, and failures.
+- Status: IMPLEMENTED FOUNDATION. No validated benchmark results exist yet.
 
 ### Phase G: minimal product shell
 
@@ -62,9 +69,8 @@ yet include a validated benchmark dataset or final performance claims.
 
 ## NEXT
 
-- Experimental Dataset Preparation.
 - Human-labelled evaluation data where appropriate.
-- Reproducible benchmark fixtures and reporting procedures.
+- Controlled benchmark execution and reporting.
 
 ## PLANNED
 

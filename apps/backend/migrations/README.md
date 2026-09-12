@@ -24,6 +24,13 @@ instruction_following, contextual_grounding, and clarity rubric:
 psql "$env:DATABASE_URL" -f apps/backend/migrations/011_response_evaluations.sql
 ```
 
+Benchmark hardening adds an explicit JSON column for generation parameters,
+separate from provider usage metadata:
+
+```powershell
+psql "$env:DATABASE_URL" -f apps/backend/migrations/012_benchmark_hardening.sql
+```
+
 Projects use archive status instead of deletion. The owner membership is explicit and is created in the same transaction as its project.
 
 Messages use a per-conversation `sequence` for deterministic ordering. Clients may send `Idempotency-Key`; a repeated key in the same conversation returns the original message instead of inserting a duplicate.
