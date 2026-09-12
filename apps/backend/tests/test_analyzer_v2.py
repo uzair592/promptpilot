@@ -154,6 +154,27 @@ def test_openrouter_http_contract_and_structured_validation(monkeypatch):
     assert body["messages"][1]["role"] == "user"
 
 
+def test_missing_provider_key_fails_without_request(monkeypatch):
+    import promptpilot_backend.llm_provider as module
+
+    monkeypatch.setattr(
+        module,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "llm_base_url": "https://example.test/v1",
+                "llm_model": "test-model",
+                "llm_api_key": "",
+                "llm_timeout": 3,
+            },
+        )(),
+    )
+    with pytest.raises(module.ProviderConfigurationError):
+        OpenAICompatibleProvider().analyze("Build a store")
+
+
 def test_malformed_provider_response_is_rejected(monkeypatch):
     import promptpilot_backend.llm_provider as module
 

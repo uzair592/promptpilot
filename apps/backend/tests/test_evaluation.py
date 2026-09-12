@@ -289,6 +289,10 @@ def test_llm_judge_payload_is_blind_and_audit_evidence_is_preserved(client):
     assert audit_evidence["optimized_prompt"].startswith(
         "Explain how aluminium foil is used in Pakistan."
     )
+    assert audit_evidence["judge_assignment"] == {
+        "response_a": "promptpilot",
+        "response_b": "baseline",
+    }
 
 
 def test_llm_judge_assignment_directions_map_scores_back_to_strategies(client):
@@ -316,6 +320,10 @@ def test_llm_judge_assignment_directions_map_scores_back_to_strategies(client):
         _, response_a, response_b, evidence = judge.calls[0]
         assert response_a.startswith(expected_first)
         assert response_b.startswith(expected_second)
+        metadata = json.loads(evaluation.metadata_json)
+        assert metadata["judge_assignment"]["response_a"] == (
+            "baseline" if assignment() else "promptpilot"
+        )
         assert set(evidence) == {
             "task",
             "requirements",

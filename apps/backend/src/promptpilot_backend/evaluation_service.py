@@ -307,6 +307,13 @@ def _json_list(value: str | None) -> list[str]:
 def _generation_parameters(run: ModelRun) -> dict[str, object] | None:
     """Read optional comparable generation parameters without treating usage as parameters."""
 
+    try:
+        explicit = json.loads(run.generation_parameters_json)
+    except (AttributeError, TypeError, json.JSONDecodeError):
+        explicit = None
+    if isinstance(explicit, dict):
+        return explicit
+
     for attribute in ("generation_parameters", "parameters"):
         value = getattr(run, attribute, None)
         if isinstance(value, dict):
@@ -568,15 +575,19 @@ class ResponseEvaluationService:
         )
         evidence["response_a"] = baseline.response_text or ""
         evidence["response_b"] = promptpilot.response_text or ""
+        assignment = "baseline_first" if self.assignment() else "promptpilot_first"
         if method == "llm_judge":
             first, second = (
-                (baseline, promptpilot) if self.assignment() else (promptpilot, baseline)
+                (baseline, promptpilot)
+                if assignment == "baseline_first"
+                else (promptpilot, baseline)
             )
             first_result, second_result = self._judge(
                 task_text, first.response_text or "", second.response_text or "", evidence
             )
             results = {first.id: first_result, second.id: second_result}
         else:
+            assignment = "baseline_first"
             results = {
                 baseline.id: heuristic_score(
                     task_text, baseline.response_text or "", requirements, constraints, context
@@ -618,7 +629,20 @@ class ResponseEvaluationService:
             baseline_weaknesses=json.dumps(baseline_weaknesses),
             promptpilot_strengths=json.dumps(promptpilot_strengths),
             promptpilot_weaknesses=json.dumps(promptpilot_weaknesses),
-            metadata_json=json.dumps(evidence, default=str),
+            metadata_json=json.dumps(
+                {
+                    **evidence,
+                    "judge_assignment": {
+                        "response_a": "baseline"
+                        if assignment == "baseline_first"
+                        else "promptpilot",
+                        "response_b": "promptpilot"
+                        if assignment == "baseline_first"
+                        else "baseline",
+                    },
+                },
+                default=str,
+            ),
         )
         for label, result in (("baseline", baseline_result), ("promptpilot", promptpilot_result)):
             for dimension in EVALUATION_DIMENSIONS:

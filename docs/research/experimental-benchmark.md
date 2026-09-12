@@ -44,18 +44,23 @@ held constant. The optimized prompt and context are stored in `PromptVersion`
 metadata. Each condition is stored as a `ModelRun` and evaluated through the
 existing response evaluation service.
 
-## Reproducibility
+## Reproducibility and provenance
 
 Each exported record includes the benchmark task ID, source message, condition
-run IDs, provider, model, parameters, optimized prompt, assembled context,
-evaluation method, rubric version, timestamps, order, and errors. JSON and CSV
-exports are supported.
+run IDs, provider, model, typed generation parameters, optimized prompt,
+assembled context, evaluation method, rubric version, timestamps, condition
+order, dataset version and SHA-256, repository revision when Git is available,
+code revision, deterministic request hash, and errors. JSON and CSV exports are
+supported. Request hashes canonicalize task facts, condition, provider/model,
+generation parameters, optimized prompt, and context; secrets are not inputs.
 
-The backend stores generation parameters alongside usage metadata so paired-run
-validation can enforce comparable parameters. Provider APIs may be
-nondeterministic; no seed is invented when a provider does not support one.
-Repeated runs are supported for later mean, median, and variance calculations.
-This milestone does not implement significance testing.
+Generation parameters are stored separately from provider token usage so paired
+validation can enforce comparable configuration. Temperature, max tokens, top-p,
+and provider-supported options may be recorded; no seed is recorded unless the
+provider actually supports and receives one. Condition order is injected or
+alternated by repetition and persisted for audit. Provider APIs may still be
+nondeterministic. Repeated runs are supported for later mean, median, and
+variance calculations. This milestone does not implement significance testing.
 
 ## Evaluation
 
@@ -69,8 +74,9 @@ The existing `v1` rubric is used without modification:
 
 The backend calculates the weighted aggregate. The heuristic evaluator measures
 observable response properties and does not make factual-truth claims. LLM
-judging retains neutral A/B evidence and maps scores back to baseline and
-PromptPilot using the existing audited service.
+judging receives neutral A/B responses; the randomized mapping is persisted in
+`Evaluation.metadata_json` as `judge_assignment`, and scores are mapped back to
+baseline and PromptPilot by run ID.
 
 ## Valid evidence and limitations
 
@@ -82,5 +88,13 @@ optimized prompt builder is deliberately transparent and dataset-driven; it is
 not an autonomous agent, embedding retriever, or production experiment
 orchestrator.
 
-Later work may add human labels, richer context fixtures, statistical
-summaries, and controlled provider-specific reproducibility metadata.
+## Implemented infrastructure versus results
+
+**Benchmark infrastructure: IMPLEMENTED.** The dataset schema, paired runner,
+provenance fields, hashing, exports, evaluation integration, and deterministic
+mock tests are implemented.
+
+**Validated benchmark results: NOT YET AVAILABLE.** No real-provider experiment
+results or superiority claims are reported. Later work may add human labels,
+richer context fixtures, statistical summaries, and controlled provider-specific
+reproducibility metadata.

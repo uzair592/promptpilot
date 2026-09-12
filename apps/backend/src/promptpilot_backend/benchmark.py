@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import subprocess
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,6 +62,30 @@ class BenchmarkDataset(BaseModel):
         raise KeyError(f"Unknown benchmark task: {task_id}")
 
 
+class BenchmarkAttemptRecord(BaseModel):
+    benchmark_task_id: str
+    repetition: int
+    condition: str
+    project_id: UUID
+    conversation_id: UUID
+    source_message_id: UUID
+    provider: str
+    model: str
+    generation_parameters: dict[str, Any] = Field(default_factory=dict)
+    prompt_version_id: UUID | None = None
+    model_run_id: UUID | None = None
+    evaluation_id: UUID | None = None
+    dataset_version: str
+    dataset_sha256: str
+    repository_sha: str | None
+    code_revision: str
+    request_hash: str
+    execution_order: int
+    status: str
+    error: str | None = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class BenchmarkRunRecord(BaseModel):
     schema_version: str = BENCHMARK_SCHEMA_VERSION
     benchmark_task_id: str
@@ -79,6 +105,13 @@ class BenchmarkRunRecord(BaseModel):
     provider: str | None = None
     model: str | None = None
     model_parameters: dict[str, Any] = Field(default_factory=dict)
+    dataset_version: str = BENCHMARK_SCHEMA_VERSION
+    dataset_sha256: str
+    repository_sha: str | None
+    code_revision: str
+    request_hash: str
+    condition_order: list[str]
+    attempts: list[BenchmarkAttemptRecord] = Field(default_factory=list)
     evaluation_method: str | None = None
     rubric_version: str = RUBRIC_VERSION
     error: str | None = None
@@ -91,6 +124,48 @@ def load_dataset(path: str | Path) -> BenchmarkDataset:
     dataset_path = Path(path)
     with dataset_path.open(encoding="utf-8") as handle:
         return BenchmarkDataset.model_validate(json.load(handle))
+
+
+def dataset_sha256(dataset: BenchmarkDataset) -> str:
+    canonical = json.dumps(
+        dataset.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+    ).encode()
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def repository_sha() -> str | None:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+            )
+            .strip()
+            or None
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def request_hash(
+    task: BenchmarkTask,
+    condition: str,
+    provider: str,
+    model: str,
+    parameters: dict[str, Any],
+    optimized_prompt: str | None,
+    context: list[str],
+) -> str:
+    material = {
+        "task": task.model_dump(mode="json"),
+        "condition": condition,
+        "provider": provider,
+        "model": model,
+        "parameters": parameters,
+        "optimized_prompt": optimized_prompt,
+        "context": context,
+    }
+    canonical = json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def export_records_json(records: Iterable[BenchmarkRunRecord], path: str | Path) -> None:
@@ -119,6 +194,13 @@ def export_records_csv(records: Iterable[BenchmarkRunRecord], path: str | Path) 
         "provider",
         "model",
         "model_parameters",
+        "dataset_version",
+        "dataset_sha256",
+        "repository_sha",
+        "code_revision",
+        "request_hash",
+        "condition_order",
+        "attempts",
         "evaluation_method",
         "rubric_version",
         "error",
@@ -130,6 +212,8 @@ def export_records_csv(records: Iterable[BenchmarkRunRecord], path: str | Path) 
         for row in rows:
             row["assembled_context"] = json.dumps(row["assembled_context"])
             row["model_parameters"] = json.dumps(row["model_parameters"], sort_keys=True)
+            row["condition_order"] = json.dumps(row["condition_order"])
+            row["attempts"] = json.dumps(row["attempts"], sort_keys=True)
             writer.writerow(row)
 
 
@@ -162,10 +246,20 @@ class BenchmarkRunner:
         execution_service: LLMExecutionService,
         evaluation_service: ResponseEvaluationService | None = None,
         prompt_builder: PromptBuilder = default_prompt_builder,
+        condition_order: Callable[[int], tuple[str, str]] | None = None,
+        repository_revision: str | None = None,
     ) -> None:
         self.execution_service = execution_service
         self.evaluation_service = evaluation_service or ResponseEvaluationService()
         self.prompt_builder = prompt_builder
+        self.condition_order = condition_order or (
+            lambda repetition: ("promptpilot", "baseline")
+            if repetition % 2
+            else ("baseline", "promptpilot")
+        )
+        self.repository_revision = (
+            repository_revision if repository_revision is not None else repository_sha()
+        )
 
     def run(
         self,
@@ -181,6 +275,7 @@ class BenchmarkRunner:
             raise ValueError("repetitions must be at least 1")
         records: list[BenchmarkRunRecord] = []
         run_order = 0
+        dataset_hash = dataset_sha256(dataset)
         for task in dataset.tasks:
             for repetition in range(1, repetitions + 1):
                 run_order += 1
@@ -193,6 +288,8 @@ class BenchmarkRunner:
                         run_order,
                         parameters or {},
                         evaluation_method,
+                        dataset.schema_version,
+                        dataset_hash,
                     )
                 )
         return records
@@ -206,6 +303,8 @@ class BenchmarkRunner:
         run_order: int,
         parameters: dict[str, Any],
         evaluation_method: str,
+        dataset_version: str,
+        dataset_hash: str,
     ) -> BenchmarkRunRecord:
         project = Project(owner_id=owner_id, name=f"Benchmark {task.task_id} r{repetition}")
         db.add(project)
@@ -247,15 +346,56 @@ class BenchmarkRunner:
 
         baseline_id: UUID | None = None
         promptpilot_id: UUID | None = None
+        condition_order = list(self.condition_order(repetition))
+        if sorted(condition_order) != ["baseline", "promptpilot"]:
+            raise ValueError("condition_order must contain baseline and promptpilot exactly once")
+        attempts: list[BenchmarkAttemptRecord] = []
         error: str | None = None
         try:
-            baseline, _ = self.execution_service.execute(
-                db, None, message, None, parameters, "baseline"
-            )
+            runs: dict[str, ModelRun] = {}
+            for execution_order, condition in enumerate(condition_order, 1):
+                run, _ = self.execution_service.execute(
+                    db,
+                    version if condition == "promptpilot" else None,
+                    message,
+                    None,
+                    parameters,
+                    condition,
+                )
+                runs[condition] = run
+                attempts.append(
+                    BenchmarkAttemptRecord(
+                        benchmark_task_id=task.task_id,
+                        repetition=repetition,
+                        condition=condition,
+                        project_id=project.id,
+                        conversation_id=conversation.id,
+                        source_message_id=message.id,
+                        provider=run.provider,
+                        model=run.model,
+                        generation_parameters=parameters,
+                        prompt_version_id=version.id if condition == "promptpilot" else None,
+                        model_run_id=run.id,
+                        dataset_version=dataset_version,
+                        dataset_sha256=dataset_hash,
+                        repository_sha=self.repository_revision,
+                        code_revision=self.repository_revision or "git-unavailable",
+                        request_hash=request_hash(
+                            task,
+                            condition,
+                            run.provider,
+                            run.model,
+                            parameters,
+                            optimized_prompt if condition == "promptpilot" else None,
+                            context,
+                        ),
+                        execution_order=execution_order,
+                        status=run.status,
+                    )
+                )
+            baseline = runs["baseline"]
+            promptpilot = runs["promptpilot"]
             baseline_id = baseline.id
-            promptpilot, _ = self.execution_service.execute(
-                db, version, message, None, parameters, "promptpilot"
-            )
             promptpilot_id = promptpilot.id
             evaluation = self.evaluation_service.evaluate_pair(
                 db,
@@ -287,6 +427,21 @@ class BenchmarkRunner:
                 provider=baseline.provider,
                 model=baseline.model,
                 model_parameters=parameters,
+                dataset_version=dataset_version,
+                dataset_sha256=dataset_hash,
+                repository_sha=self.repository_revision,
+                code_revision=self.repository_revision or "git-unavailable",
+                request_hash=request_hash(
+                    task,
+                    "pair",
+                    baseline.provider,
+                    baseline.model,
+                    parameters,
+                    optimized_prompt,
+                    context,
+                ),
+                condition_order=condition_order,
+                attempts=attempts,
                 evaluation_method=evaluation_method,
             )
         except (ProviderUnavailable, ValueError) as exc:
@@ -312,6 +467,46 @@ class BenchmarkRunner:
                     .order_by(ModelRun.created_at.desc())
                 ).first()
                 promptpilot_id = promptpilot_run.id if promptpilot_run else None
+            existing_runs = {
+                "baseline": db.get(ModelRun, baseline_id) if baseline_id else None,
+                "promptpilot": db.get(ModelRun, promptpilot_id) if promptpilot_id else None,
+            }
+            attempts = []
+            for execution_order, condition in enumerate(condition_order, 1):
+                existing_run = existing_runs[condition]
+                if existing_run is None:
+                    continue
+                attempts.append(
+                    BenchmarkAttemptRecord(
+                        benchmark_task_id=task.task_id,
+                        repetition=repetition,
+                        condition=condition,
+                        project_id=project.id,
+                        conversation_id=conversation.id,
+                        source_message_id=message.id,
+                        provider=existing_run.provider,
+                        model=existing_run.model,
+                        generation_parameters=parameters,
+                        prompt_version_id=version.id if condition == "promptpilot" else None,
+                        model_run_id=existing_run.id,
+                        dataset_version=dataset_version,
+                        dataset_sha256=dataset_hash,
+                        repository_sha=self.repository_revision,
+                        code_revision=self.repository_revision or "git-unavailable",
+                        request_hash=request_hash(
+                            task,
+                            condition,
+                            existing_run.provider,
+                            existing_run.model,
+                            parameters,
+                            optimized_prompt if condition == "promptpilot" else None,
+                            context,
+                        ),
+                        execution_order=execution_order,
+                        status=existing_run.status,
+                        error=existing_run.error_message,
+                    )
+                )
             return BenchmarkRunRecord(
                 benchmark_task_id=task.task_id,
                 repetition=repetition,
@@ -329,6 +524,21 @@ class BenchmarkRunner:
                 provider=self.execution_service.provider.name,
                 model=self.execution_service.provider.model,
                 model_parameters=parameters,
+                dataset_version=dataset_version,
+                dataset_sha256=dataset_hash,
+                repository_sha=self.repository_revision,
+                code_revision=self.repository_revision or "git-unavailable",
+                request_hash=request_hash(
+                    task,
+                    "pair",
+                    self.execution_service.provider.name,
+                    self.execution_service.provider.model,
+                    parameters,
+                    optimized_prompt,
+                    context,
+                ),
+                condition_order=condition_order,
+                attempts=attempts,
                 evaluation_method=evaluation_method,
                 error=error,
             )

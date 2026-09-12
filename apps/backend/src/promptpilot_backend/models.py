@@ -349,6 +349,7 @@ class ModelRun(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     finish_reason: Mapped[str | None] = mapped_column(String(80))
     usage_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    generation_parameters_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

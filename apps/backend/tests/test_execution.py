@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 from promptpilot_backend.execution_service import LLMExecutionService
@@ -38,3 +39,6 @@ def test_baseline_and_promptpilot_execute_exact_prompt(db_session):
     assert provider.payloads == [{"prompt": "Original exact prompt", "system_instruction": None, "parameters": {}}, {"prompt": "Optimized exact prompt", "system_instruction": None, "parameters": {}}]
     assert baseline.execution_strategy == "baseline"
     assert pilot.prompt_version_id == version.id
+    assert json.loads(baseline.generation_parameters_json) == {}
+    assert json.loads(pilot.generation_parameters_json) == {}
+    assert json.loads(baseline.usage_json) == {"total_tokens": 7}
