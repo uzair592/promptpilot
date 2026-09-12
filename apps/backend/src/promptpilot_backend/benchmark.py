@@ -254,7 +254,7 @@ class BenchmarkRunner:
         self.prompt_builder = prompt_builder
         self.condition_order = condition_order or (
             lambda repetition: ("promptpilot", "baseline")
-            if repetition % 2
+            if (repetition + 1) % 2
             else ("baseline", "promptpilot")
         )
         self.repository_revision = (

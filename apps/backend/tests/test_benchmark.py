@@ -101,7 +101,7 @@ def test_runner_pairs_runs_preserves_lineage_and_exports(db_session, tmp_path):
     runner = BenchmarkRunner(
         execution_service=LLMExecutionService(provider),
         condition_order=lambda repetition: (
-            ("promptpilot", "baseline") if repetition == 1 else ("baseline", "promptpilot")
+            ("baseline", "promptpilot") if repetition == 1 else ("promptpilot", "baseline")
         ),
         repository_revision="test-revision",
     )
@@ -121,12 +121,12 @@ def test_runner_pairs_runs_preserves_lineage_and_exports(db_session, tmp_path):
     assert records[0].baseline_model_run_id
     assert records[0].promptpilot_model_run_id
     assert records[0].evaluation_id
-    assert records[0].condition_order == ["promptpilot", "baseline"]
-    assert records[1].condition_order == ["baseline", "promptpilot"]
+    assert records[0].condition_order == ["baseline", "promptpilot"]
+    assert records[1].condition_order == ["promptpilot", "baseline"]
     assert records[0].dataset_sha256 == dataset_sha256(dataset())
     assert records[0].repository_sha == "test-revision"
     assert len(records[0].attempts) == 2
-    assert records[0].attempts[0].condition == "promptpilot"
+    assert records[0].attempts[0].condition == "baseline"
     assert records[0].attempts[0].execution_order == 1
     assert records[0].attempts[0].generation_parameters == {"temperature": 0}
     assert provider.calls[0]["parameters"] == {"temperature": 0}
