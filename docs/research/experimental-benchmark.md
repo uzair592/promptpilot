@@ -57,8 +57,8 @@ generation parameters, optimized prompt, and context; secrets are not inputs.
 Generation parameters are stored separately from provider token usage so paired
 validation can enforce comparable configuration. Temperature, max tokens, top-p,
 and provider-supported options may be recorded; no seed is recorded unless the
-provider actually supports and receives one. Condition order is injected or
-alternated by repetition and persisted for audit. Provider APIs may still be
+provider actually supports and receives one. Condition order uses balanced
+alternating execution order by repetition and is persisted for audit. Provider APIs may still be
 nondeterministic. Repeated runs are supported for later mean, median, and
 variance calculations. This milestone does not implement significance testing.
 
