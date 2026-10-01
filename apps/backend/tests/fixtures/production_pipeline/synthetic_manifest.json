@@ -1,0 +1,87 @@
+{
+  "schema_version": "v1",
+  "fixture_id": "synthetic-planning-workshop-v1",
+  "fixture_kind": "synthetic_offline_test",
+  "review": {
+    "status": "synthetic",
+    "reviewer_id": null,
+    "reviewed_at": null
+  },
+  "dataset_name": "promptpilot-experimental-v1",
+  "dataset_sha256": "8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d",
+  "task_id": "planning-launch-001",
+  "original_task": {
+    "fixture_id": "original-task",
+    "task_id": "planning-launch-001",
+    "source_type": "dataset_original",
+    "content": "Create a practical plan for launching a small community workshop.",
+    "content_sha256": "ca2577ed309559175027c0e09268a1cc568e2e9ad531ab3c60a33f4e63ebea39",
+    "provenance": {
+      "source_type": "dataset_original",
+      "source_id": "original-task",
+      "description": "Exact task_text from benchmark_dataset.json"
+    }
+  },
+  "project_facts": [
+    {
+      "fixture_id": "synthetic-fact-1",
+      "task_id": "planning-launch-001",
+      "source_type": "synthetic_test",
+      "content": "The mock team has three volunteers and a budget of 100 fictional credits.",
+      "content_sha256": "03f90385a96ca2121a8d392664e7107ad389c3868926c4429a471ae28779594d",
+      "provenance": {
+        "source_type": "synthetic_test",
+        "source_id": "synthetic-fact-1",
+        "description": "Invented exclusively for offline validator tests"
+      }
+    }
+  ],
+  "clarification_answers": [
+    {
+      "fixture_id": "synthetic-answer-1",
+      "task_id": "planning-launch-001",
+      "source_type": "synthetic_test",
+      "content": "The mock workshop is for first-time gardeners.",
+      "content_sha256": "cb30aa78c029f15fdcb898a2ad6aad28c82f8b220f540c0d6bd5b02994735252",
+      "provenance": {
+        "source_type": "synthetic_test",
+        "source_id": "synthetic-answer-1",
+        "description": "Invented exclusively for offline validator tests"
+      },
+      "gap_key": {
+        "dimension": "audience",
+        "question_target": "Who is the workshop for?"
+      }
+    }
+  ],
+  "frozen_documents": [
+    {
+      "fixture_id": "synthetic-document-1",
+      "task_id": "planning-launch-001",
+      "source_type": "frozen_document",
+      "path": "synthetic_workshop.txt",
+      "filename": "synthetic_workshop.txt",
+      "media_type": "text/plain",
+      "content_sha256": "e9f328f1ac66069c0020fea262b68bb16a62bcab7bac6f89a0915ac490c043b8",
+      "provenance": {
+        "source_type": "frozen_document",
+        "source_id": "synthetic-document-1",
+        "description": "Synthetic bytes frozen for offline validator tests only"
+      }
+    }
+  ],
+  "evaluation_only": [
+    {
+      "fixture_id": "synthetic-evaluation-1",
+      "task_id": "planning-launch-001",
+      "source_type": "evaluation_only",
+      "content": "SYNTHETIC_EVAL_ONLY_MARKER: mention a sequence of workshop phases.",
+      "content_sha256": "ca4eb6840b9e63e3894a4248b48cacb7332a1d48c750b74aa98f4340a8afb0e4",
+      "provenance": {
+        "source_type": "evaluation_only",
+        "source_id": "synthetic-evaluation-1",
+        "description": "Synthetic criterion used only to test projection isolation"
+      }
+    }
+  ]
+}

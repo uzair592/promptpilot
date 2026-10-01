@@ -175,6 +175,11 @@ actual upper bound; failures may make fewer downstream calls.
 
 ## Smallest implementation milestone and offline acceptance
 
+The first item below now has a standalone fixture contract, offline validator,
+and synthetic test fixture; see
+[production-benchmark-fixtures.md](production-benchmark-fixtures.md). This does
+not execute the production pipeline or admit the synthetic fixture to a live study.
+
 1. Add a separate fixture manifest and validator with explicit source type,
    task ID, reviewed answer/gap key, document bytes/checksum, and
    evaluation-only boundary. Do not change task text to improve scores.
