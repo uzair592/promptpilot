@@ -1,4 +1,8 @@
 import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from promptpilot_backend.benchmark import (
     BenchmarkDataset,
@@ -9,6 +13,7 @@ from promptpilot_backend.benchmark import (
     load_dataset,
     request_hash,
 )
+from promptpilot_backend.benchmark_pilot import PILOT_TASK_IDS, select_pilot_tasks
 from promptpilot_backend.execution_service import LLMExecutionService
 from promptpilot_backend.llm_provider import ProviderUnavailable
 from promptpilot_backend.models import User
@@ -100,9 +105,6 @@ def test_runner_pairs_runs_preserves_lineage_and_exports(db_session, tmp_path):
     provider = FixtureProvider()
     runner = BenchmarkRunner(
         execution_service=LLMExecutionService(provider),
-        condition_order=lambda repetition: (
-            ("baseline", "promptpilot") if repetition == 1 else ("promptpilot", "baseline")
-        ),
         repository_revision="test-revision",
     )
 
@@ -130,12 +132,32 @@ def test_runner_pairs_runs_preserves_lineage_and_exports(db_session, tmp_path):
     assert records[0].attempts[0].execution_order == 1
     assert records[0].attempts[0].generation_parameters == {"temperature": 0}
     assert provider.calls[0]["parameters"] == {"temperature": 0}
+    assert [call["prompt"] for call in provider.calls] == [
+        dataset().tasks[0].task_text,
+        records[0].optimized_prompt,
+        records[1].optimized_prompt,
+        dataset().tasks[0].task_text,
+    ]
+    assert all(call["system_instruction"] is None for call in provider.calls)
+    assert all(call["parameters"] == {"temperature": 0} for call in provider.calls)
+    assert records[0].attempts[0].executed_prompt == records[0].source_message
+    assert records[0].attempts[0].response_text.startswith("Fixture response")
+    assert records[0].attempts[0].usage == {"total_tokens": 10}
+    assert records[0].context_provenance == [
+        {"source": "dataset.available_context", "index": 0, "text": "Fixture context"}
+    ]
+    assert records[0].task_facts["requirements"] == ["Mention the test"]
+    assert records[0].evaluation["rubric_version"] == "v1"
+    assert len(records[0].evaluation["items"]) == 10
     export_records_json(records, tmp_path / "results.json")
     export_records_csv(records, tmp_path / "results.csv")
     assert len(json.loads((tmp_path / "results.json").read_text(encoding="utf-8"))) == 2
     exported_json = (tmp_path / "results.json").read_text(encoding="utf-8")
     exported_csv = (tmp_path / "results.csv").read_text(encoding="utf-8")
     assert "benchmark_task_id" in exported_csv
+    assert "Fixture response" in exported_json + exported_csv
+    assert "context_provenance" in exported_csv
+    assert "evaluation" in exported_csv
     assert "test-secret" not in exported_json + exported_csv
 
 
@@ -183,3 +205,58 @@ def test_runner_records_failed_condition_without_evaluation(db_session):
     assert records[0].error == "fixture failure"
     assert len(records[0].attempts) == 2
     assert {attempt.status for attempt in records[0].attempts} == {"succeeded", "failed"}
+    assert records[0].attempts[0].response_text is not None
+    assert records[0].attempts[1].response_text is None
+    assert records[0].evaluation is None
+
+
+def test_fixed_pilot_selection_and_source_material():
+    source = load_dataset(Path(__file__).resolve().parents[1] / "benchmark_dataset.json")
+    selected = select_pilot_tasks(source)
+    assert tuple(task.task_id for task in selected.tasks) == PILOT_TASK_IDS
+    assert len({task.category for task in selected.tasks}) == 8
+    assert "Staff must report" in selected.task("summarization-policy-001").task_text
+    assert "INV-2026-0147" in selected.task("extraction-invoice-001").task_text
+
+
+def test_pilot_config_fails_closed_without_provider(monkeypatch):
+    import promptpilot_backend.benchmark_pilot as pilot
+
+    monkeypatch.setattr(
+        pilot,
+        "get_settings",
+        lambda: SimpleNamespace(
+            llm_provider="",
+            llm_base_url="",
+            llm_model="",
+            llm_api_key="",
+            llm_timeout=30,
+        ),
+    )
+    with pytest.raises(ValueError, match="LLM_PROVIDER"):
+        pilot.require_live_config()
+
+
+def test_exports_redact_configured_credential(db_session, tmp_path, monkeypatch):
+    import promptpilot_backend.benchmark as benchmark
+
+    user = User(
+        email="benchmark-secret@example.com",
+        normalized_email="benchmark-secret@example.com",
+        display_name="Benchmark",
+        password_hash="hash",
+    )
+    db_session.add(user)
+    db_session.commit()
+    records = BenchmarkRunner(LLMExecutionService(FixtureProvider())).run(
+        db_session, dataset(), user.id
+    )
+    secret = 'pilot"secret'
+    records[0].attempts[0].response_text = secret
+    records[0].evaluation["metadata"]["provider_note"] = secret
+    monkeypatch.setattr(benchmark, "get_settings", lambda: SimpleNamespace(llm_api_key=secret))
+    export_records_json(records, tmp_path / "redacted.json")
+    export_records_csv(records, tmp_path / "redacted.csv")
+    assert secret not in (tmp_path / "redacted.json").read_text(encoding="utf-8")
+    assert secret not in (tmp_path / "redacted.csv").read_text(encoding="utf-8")
+    assert "[REDACTED]" in (tmp_path / "redacted.json").read_text(encoding="utf-8")

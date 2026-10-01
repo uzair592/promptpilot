@@ -283,6 +283,8 @@ def test_llm_judge_payload_is_blind_and_audit_evidence_is_preserved(client):
     assert evaluation.baseline_score == 90
     assert evaluation.promptpilot_score == 10
     audit_evidence = json.loads(evaluation.metadata_json)
+    assert audit_evidence["response_a"] == response_a
+    assert audit_evidence["response_b"] == response_b
     assert audit_evidence["baseline_executed_prompt"] == (
         "Explain how aluminium foil is used in Pakistan."
     )
@@ -321,6 +323,8 @@ def test_llm_judge_assignment_directions_map_scores_back_to_strategies(client):
         assert response_a.startswith(expected_first)
         assert response_b.startswith(expected_second)
         metadata = json.loads(evaluation.metadata_json)
+        assert metadata["response_a"] == response_a
+        assert metadata["response_b"] == response_b
         assert metadata["judge_assignment"]["response_a"] == (
             "baseline" if assignment() else "promptpilot"
         )
