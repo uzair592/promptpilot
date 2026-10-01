@@ -105,6 +105,9 @@ executions, and evaluations.
 - The experimental benchmark foundation validates stable task IDs, isolates each
   repeated task pair in its own project/conversation, preserves model parameters in
   run metadata, and exports raw records without claiming results.
+- The fixed pilot is explicitly a `benchmark_infrastructure_smoke_test` using a
+  deterministic dataset template under the existing `promptpilot` execution strategy.
+  A production-pipeline adapter is a separate research milestone before FYP claims.
 
 ## PLANNED
 

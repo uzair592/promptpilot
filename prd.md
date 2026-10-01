@@ -102,7 +102,7 @@ results exist yet.
 - Prompt generation and versioning: `PromptGenerationInput` and `PromptVersion` persist optimized prompts with provider/model metadata, generation mode, and source-message provenance.
 - Target execution and `ModelRun`: execution supports `baseline` and `promptpilot` strategies, records provider/model/usage, and stores the selected prompt and output alongside a source message.
 - Response evaluation and audit (IMPLEMENTED / RESEARCH-AUDITED): heuristic evaluator, LLM judge, five dimensions, deterministic weighted aggregate, neutral A/B judging, same-task/source-message and same provider/model validation, persistence, comparison, frontend comparison/history support, and regression tests.
-- Experimental benchmark harness: validated JSON dataset schema with stable task IDs, paired baseline/PromptPilot execution, repeated runs, lineage-preserving exports, and integration with `v1` evaluation. No validated benchmark results exist yet.
+- Experimental benchmark harness: validated JSON dataset schema with stable task IDs, paired baseline/template execution, repeated runs, lineage-preserving exports, and integration with `v1` evaluation. The current fixed pilot is an infrastructure smoke test using a deterministic dataset template under the `promptpilot` execution strategy; it does not run the production context-engineering pipeline or support full FYP effectiveness claims.
 - Frontend shell: the Next.js app includes login/register pages, dashboard, project list, project page, conversation workspace, and context preview. It contains the core workspace and implemented controls, while some richer workflow areas remain under development.
 
 ### Implemented API surface

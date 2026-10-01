@@ -2,10 +2,13 @@
 
 ## Purpose
 
-This milestone defines the first research-grade raw-data pipeline for comparing
-direct target-model execution with PromptPilot execution. It records paired
+This milestone defines a benchmark infrastructure smoke test for paired
+direct-task and dataset-template execution. It records paired
 model runs and existing `v1` response evaluations without presuming that either
-condition will win.
+condition will win. The `promptpilot` execution strategy here preserves the
+model-run contract; its prompt is built by `default_prompt_builder` from dataset
+facts, not by PromptPilot's production context-engineering pipeline. Scores
+from this pilot cannot establish the full FYP pipeline's effectiveness.
 
 No validated benchmark results are reported until the dataset and experiment
 runs have been completed.
@@ -35,7 +38,7 @@ For every task and repetition, the runner creates one isolated project,
 conversation, and source user message:
 
 1. **Baseline:** original task -> target provider/model -> response.
-2. **PromptPilot:** dataset facts -> optimized prompt artifact -> same target
+2. **Template condition (`promptpilot` strategy):** dataset facts -> optimized prompt artifact -> same target
    provider/model -> response.
 
 Only execution strategy and prompt differ. The source task, project,
@@ -88,10 +91,12 @@ baseline and PromptPilot by run ID.
 Valid evidence requires a successful paired run with the same target provider,
 model, source task, project/conversation, and comparable parameters. Failed
 conditions are retained as failed records and are not evaluated as successful
-pairs. A single run is not evidence of causal superiority. The initial
-optimized prompt builder is deliberately transparent and dataset-driven; it is
-not an autonomous agent, embedding retriever, or production experiment
-orchestrator.
+pairs. A single run is not evidence of causal superiority. The current
+deterministic template does not run analysis, clarification, memory, retrieval,
+context assembly, or production prompt generation. Exported records and
+`PromptVersion` metadata label this run as
+`benchmark_infrastructure_smoke_test`. Scores are diagnostic for the harness
+and template condition only, not evidence for the full FYP pipeline.
 
 ## Implemented infrastructure versus results
 
@@ -99,10 +104,11 @@ orchestrator.
 provenance fields, hashing, exports, evaluation integration, and deterministic
 mock tests are implemented.
 
-**Validated benchmark results: NOT YET AVAILABLE.** No real-provider experiment
-results or superiority claims are reported. Later work may add human labels,
-richer context fixtures, statistical summaries, and controlled provider-specific
-reproducibility metadata.
+**Validated full-pipeline results: NOT YET AVAILABLE.** No real-provider
+experiment results or superiority claims are reported. The next research
+milestone is a separately designed adapter that runs the production
+context-engineering pipeline under a controlled paired protocol, with
+appropriate human review and labels. It is outside this smoke test.
 
 ## Fixed controlled pilot
 
@@ -142,7 +148,9 @@ python -m promptpilot_backend.benchmark_pilot --dataset benchmark_dataset.json -
 ```
 
 The command refuses missing or unexpected provider settings, an unknown
-owner, and existing output paths before any target call. It runs two
+owner, missing or unwritable export directories, existing outputs, and
+conflicting paths before any target call. Both exports are staged in their
+destination directory and published without overwriting existing results. It runs two
 repetitions per task in separate projects and conversations: repetition 1
 executes baseline then PromptPilot; repetition 2 executes PromptPilot then
 baseline. The expected workload is 16 complete pairs and 32 target provider

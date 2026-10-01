@@ -16,7 +16,8 @@ from promptpilot_backend.benchmark import (
 from promptpilot_backend.benchmark_pilot import PILOT_TASK_IDS, select_pilot_tasks
 from promptpilot_backend.execution_service import LLMExecutionService
 from promptpilot_backend.llm_provider import ProviderUnavailable
-from promptpilot_backend.models import User
+from promptpilot_backend.models import PromptVersion, User
+from promptpilot_backend.project_policy import ProjectRole, require_project_access
 
 
 class FixtureProvider:
@@ -120,6 +121,13 @@ def test_runner_pairs_runs_preserves_lineage_and_exports(db_session, tmp_path):
     assert {record.status for record in records} == {"succeeded"}
     assert records[0].project_id != records[1].project_id
     assert records[0].conversation_id != records[1].conversation_id
+    for record in records:
+        project, member = require_project_access(
+            db_session, record.project_id, user.id, ProjectRole.OWNER
+        )
+        assert project.owner_id == user.id
+        assert member.role == "owner"
+        assert member.status == "active"
     assert records[0].baseline_model_run_id
     assert records[0].promptpilot_model_run_id
     assert records[0].evaluation_id
@@ -147,6 +155,15 @@ def test_runner_pairs_runs_preserves_lineage_and_exports(db_session, tmp_path):
         {"source": "dataset.available_context", "index": 0, "text": "Fixture context"}
     ]
     assert records[0].task_facts["requirements"] == ["Mention the test"]
+    assert records[0].experiment_scope == "benchmark_infrastructure_smoke_test"
+    assert all(
+        attempt.experiment_scope == "benchmark_infrastructure_smoke_test"
+        for record in records for attempt in record.attempts
+    )
+    version = db_session.get(PromptVersion, records[0].attempts[1].prompt_version_id)
+    assert json.loads(version.metadata_json)["experiment_scope"] == (
+        "benchmark_infrastructure_smoke_test"
+    )
     assert records[0].evaluation["rubric_version"] == "v1"
     assert len(records[0].evaluation["items"]) == 10
     export_records_json(records, tmp_path / "results.json")
@@ -158,6 +175,7 @@ def test_runner_pairs_runs_preserves_lineage_and_exports(db_session, tmp_path):
     assert "Fixture response" in exported_json + exported_csv
     assert "context_provenance" in exported_csv
     assert "evaluation" in exported_csv
+    assert "benchmark_infrastructure_smoke_test" in exported_json + exported_csv
     assert "test-secret" not in exported_json + exported_csv
 
 

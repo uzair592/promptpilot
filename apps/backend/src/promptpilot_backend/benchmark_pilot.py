@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID
 
@@ -60,6 +63,49 @@ def require_live_config() -> UUID:
     return UUID(owner_id)
 
 
+@contextmanager
+def prepared_exports(prefix: str) -> Iterator[tuple[tuple[Path, Path], tuple[Path, Path]]]:
+    """Verify both destinations and stage exports before any provider request."""
+
+    targets = (Path(f"{prefix}.json"), Path(f"{prefix}.csv"))
+    if targets[0].resolve(strict=False) == targets[1].resolve(strict=False):
+        raise ValueError("Export paths conflict")
+    for target in targets:
+        if not target.parent.is_dir():
+            raise ValueError(f"Export parent directory does not exist: {target.parent}")
+        if os.path.lexists(target):
+            raise ValueError(f"Output path already exists: {target}")
+
+    stages: list[Path] = []
+    try:
+        for target in targets:
+            descriptor, name = tempfile.mkstemp(
+                prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+            )
+            os.close(descriptor)
+            stages.append(Path(name))
+        for stage in stages:
+            probe = stage.with_name(stage.name + ".probe")
+            linked = False
+            try:
+                os.link(stage, probe)
+                linked = True
+            finally:
+                if linked:
+                    probe.unlink()
+        yield (stages[0], stages[1]), targets
+    finally:
+        for stage in stages:
+            stage.unlink(missing_ok=True)
+
+
+def publish_exports(stages: tuple[Path, Path], targets: tuple[Path, Path]) -> None:
+    """Publish without replacing results created by another process."""
+
+    for stage, target in zip(stages, targets, strict=True):
+        os.link(stage, target)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -81,33 +127,30 @@ def main() -> int:
         return 0
 
     owner_id = require_live_config()
-    json_path = Path(f"{args.output_prefix}.json")
-    csv_path = Path(f"{args.output_prefix}.csv")
-    if json_path.exists() or csv_path.exists():
-        raise ValueError("Output path already exists")
+    with prepared_exports(args.output_prefix) as (stages, targets):
+        from .db import SessionLocal
+        from .models import User
 
-    from .db import SessionLocal
-    from .models import User
-
-    provider = OpenAICompatibleProvider()
-    with SessionLocal() as db:
-        if db.get(User, owner_id) is None:
-            raise ValueError("PILOT_OWNER_ID does not identify an existing user")
-        records = BenchmarkRunner(
-            LLMExecutionService(provider),
-            ResponseEvaluationService(judge_provider=provider),
-        ).run(
-            db,
-            selected,
-            owner_id,
-            repetitions=2,
-            parameters={"temperature": 0},
-            evaluation_method=args.evaluation_method,
-        )
-    export_records_json(records, json_path)
-    export_records_csv(records, csv_path)
+        provider = OpenAICompatibleProvider()
+        with SessionLocal() as db:
+            if db.get(User, owner_id) is None:
+                raise ValueError("PILOT_OWNER_ID does not identify an existing user")
+            records = BenchmarkRunner(
+                LLMExecutionService(provider),
+                ResponseEvaluationService(judge_provider=provider),
+            ).run(
+                db,
+                selected,
+                owner_id,
+                repetitions=2,
+                parameters={"temperature": 0},
+                evaluation_method=args.evaluation_method,
+            )
+        export_records_json(records, stages[0])
+        export_records_csv(records, stages[1])
+        publish_exports(stages, targets)
     completed = sum(record.status == "succeeded" for record in records)
-    print(f"Completed pairs: {completed}/16; exports: {json_path}, {csv_path}")
+    print(f"Completed pairs: {completed}/16; exports: {targets[0]}, {targets[1]}")
     return 0 if completed == 16 else 1
 
 

@@ -20,9 +20,12 @@ from .config import get_settings
 from .evaluation_service import RUBRIC_VERSION, ResponseEvaluationService
 from .execution_service import LLMExecutionService
 from .llm_provider import ProviderUnavailable
-from .models import Conversation, Message, ModelRun, Project, PromptVersion
+from .models import Conversation, Message, ModelRun, PromptVersion, User
+from .project_service import create_project
+from .schemas import ProjectCreateRequest
 
 BENCHMARK_SCHEMA_VERSION: Literal["v1"] = "v1"
+BENCHMARK_EXPERIMENT_SCOPE = "benchmark_infrastructure_smoke_test"
 
 
 class BenchmarkTask(BaseModel):
@@ -64,6 +67,7 @@ class BenchmarkDataset(BaseModel):
 
 
 class BenchmarkAttemptRecord(BaseModel):
+    experiment_scope: str = BENCHMARK_EXPERIMENT_SCOPE
     benchmark_task_id: str
     repetition: int
     condition: str
@@ -95,6 +99,7 @@ class BenchmarkAttemptRecord(BaseModel):
 
 class BenchmarkRunRecord(BaseModel):
     schema_version: str = BENCHMARK_SCHEMA_VERSION
+    experiment_scope: str = BENCHMARK_EXPERIMENT_SCOPE
     benchmark_task_id: str
     repetition: int = Field(ge=1)
     run_order: int = Field(ge=1)
@@ -197,6 +202,7 @@ def export_records_csv(records: Iterable[BenchmarkRunRecord], path: str | Path) 
     rows = [record.model_dump(mode="json") for record in records]
     fieldnames = [
         "schema_version",
+        "experiment_scope",
         "benchmark_task_id",
         "repetition",
         "run_order",
@@ -296,6 +302,11 @@ class BenchmarkRunner:
         self.repository_revision = (
             repository_revision if repository_revision is not None else repository_sha()
         )
+        self.experiment_scope = (
+            BENCHMARK_EXPERIMENT_SCOPE
+            if prompt_builder is default_prompt_builder
+            else "custom_prompt_builder"
+        )
 
     @staticmethod
     def _context_provenance(task: BenchmarkTask) -> list[dict[str, Any]]:
@@ -341,6 +352,9 @@ class BenchmarkRunner:
     ) -> list[BenchmarkRunRecord]:
         if repetitions < 1:
             raise ValueError("repetitions must be at least 1")
+        owner = db.get(User, owner_id)
+        if owner is None:
+            raise ValueError("Benchmark owner does not exist")
         records: list[BenchmarkRunRecord] = []
         run_order = 0
         dataset_hash = dataset_sha256(dataset)
@@ -351,7 +365,7 @@ class BenchmarkRunner:
                     self._run_task(
                         db,
                         task,
-                        owner_id,
+                        owner,
                         repetition,
                         run_order,
                         parameters or {},
@@ -366,7 +380,7 @@ class BenchmarkRunner:
         self,
         db: Session,
         task: BenchmarkTask,
-        owner_id: UUID,
+        owner: User,
         repetition: int,
         run_order: int,
         parameters: dict[str, Any],
@@ -374,9 +388,9 @@ class BenchmarkRunner:
         dataset_version: str,
         dataset_hash: str,
     ) -> BenchmarkRunRecord:
-        project = Project(owner_id=owner_id, name=f"Benchmark {task.task_id} r{repetition}")
-        db.add(project)
-        db.flush()
+        project = create_project(
+            db, owner, ProjectCreateRequest(name=f"Benchmark {task.task_id} r{repetition}")
+        )
         conversation = Conversation(project_id=project.id, title=task.task_id)
         db.add(conversation)
         db.flush()
@@ -404,6 +418,7 @@ class BenchmarkRunner:
                     "benchmark_task_id": task.task_id,
                     "context": context,
                     "schema_version": BENCHMARK_SCHEMA_VERSION,
+                    "experiment_scope": self.experiment_scope,
                 }
             ),
         )
@@ -434,6 +449,7 @@ class BenchmarkRunner:
                 attempts.append(
                     BenchmarkAttemptRecord(
                         benchmark_task_id=task.task_id,
+                        experiment_scope=self.experiment_scope,
                         repetition=repetition,
                         condition=condition,
                         project_id=project.id,
@@ -485,6 +501,7 @@ class BenchmarkRunner:
             )
             return BenchmarkRunRecord(
                 benchmark_task_id=task.task_id,
+                experiment_scope=self.experiment_scope,
                 repetition=repetition,
                 run_order=run_order,
                 status="succeeded",
@@ -556,6 +573,7 @@ class BenchmarkRunner:
                 attempts.append(
                     BenchmarkAttemptRecord(
                         benchmark_task_id=task.task_id,
+                        experiment_scope=self.experiment_scope,
                         repetition=repetition,
                         condition=condition,
                         project_id=project.id,
@@ -592,6 +610,7 @@ class BenchmarkRunner:
                 )
             return BenchmarkRunRecord(
                 benchmark_task_id=task.task_id,
+                experiment_scope=self.experiment_scope,
                 repetition=repetition,
                 run_order=run_order,
                 status="failed",
