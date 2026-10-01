@@ -94,6 +94,7 @@ The actual evaluator is defined in `schemas.py` and enforced in `evaluation_serv
 ### Actual limitations in the current implementation
 
 - The header/process is a deterministic baseline, not a production-grade agentic optimizer.
+- The fixed benchmark pilot's `promptpilot` strategy executes a deterministic dataset template, not the production context-engineering pipeline; its scores are only infrastructure smoke-test data.
 - Retrieval is lexical; there is no vector database layer or embedding retrieval at this HEAD.
 - Document ingestion supports a fixed allowlist and public-URL restrictions; it does not generalize to arbitrary file types or private network destinations.
 - `OpenAICompatibleProvider` is the only active provider adapter and it reads config from environment variables.

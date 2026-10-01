@@ -582,6 +582,8 @@ class ResponseEvaluationService:
                 if assignment == "baseline_first"
                 else (promptpilot, baseline)
             )
+            evidence["response_a"] = first.response_text or ""
+            evidence["response_b"] = second.response_text or ""
             first_result, second_result = self._judge(
                 task_text, first.response_text or "", second.response_text or "", evidence
             )

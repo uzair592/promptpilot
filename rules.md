@@ -39,6 +39,7 @@ coding agents.
 - Preserve versioned prompt and run lineage. A `PromptVersion` must always be tied to a source message, and a `ModelRun` must reference project/conversation and optionally the prompt version.
 - Keep the question engine bounded. It should ask only from unresolved `InformationGap` items and avoid duplicate question text across a session.
 - Do not claim unverified benchmark results. The repo documentation explicitly says the current dataset and retrieval/evaluation baselines are experimental and not yet validated.
+- Label the fixed benchmark pilot as `benchmark_infrastructure_smoke_test`: its dataset template is not the production context-engineering pipeline, and pilot scores cannot be presented as evidence for the full FYP pipeline.
 
 ### Exact evaluation rubric in the repo
 

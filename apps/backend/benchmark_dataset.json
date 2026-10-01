@@ -16,7 +16,7 @@
     },
     {
       "task_id": "summarization-policy-001",
-      "task_text": "Summarize a short workplace policy for a new employee.",
+      "task_text": "Summarize this workplace policy for a new employee: Staff must report a workplace safety incident to their supervisor before the end of their shift. If the supervisor is unavailable, staff must contact the duty manager. The report should include the time, location, people involved, and immediate actions taken. Staff must not share personal details outside the reporting chain.",
       "objective": "Make the policy understandable without losing its operational requirements.",
       "requirements": ["Identify the main rule", "Include the escalation path"],
       "constraints": ["Use plain language", "Use bullet points"],
@@ -40,7 +40,7 @@
     },
     {
       "task_id": "extraction-invoice-001",
-      "task_text": "Extract the invoice number, due date, and total amount from the supplied invoice text.",
+      "task_text": "Extract the invoice number, due date, and total amount from this invoice text: Invoice No. INV-2026-0147. Issued 1 September 2026. Due 30 September 2026. Total due: USD 1,248.50.",
       "objective": "Return the requested fields in a machine-readable structure.",
       "requirements": ["Include all three requested fields"],
       "constraints": ["Return valid JSON only", "Do not add fields that are not present"],

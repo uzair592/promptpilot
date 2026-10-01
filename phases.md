@@ -57,9 +57,9 @@ but no validated benchmark results or final performance claims.
 ### Experimental Dataset + Benchmark Harness
 
 - Initial curated dataset spans eight task categories with stable IDs and structured task facts.
-- `benchmark.py` executes isolated repeated baseline/PromptPilot pairs through the existing provider, model-run, and `v1` evaluation services.
+- `benchmark.py` executes isolated repeated baseline/dataset-template pairs through the existing provider, model-run, and `v1` evaluation services. The template uses the `promptpilot` execution strategy but does not execute the production context-engineering pipeline.
 - JSON and CSV exports preserve task, prompt, context, model parameters, lineage, evaluation, ordering, timestamps, and failures.
-- Status: IMPLEMENTED FOUNDATION. No validated benchmark results exist yet.
+- Status: INFRASTRUCTURE SMOKE TEST READY. No validated full-pipeline benchmark results exist yet.
 
 ### Phase G: minimal product shell
 
@@ -71,6 +71,7 @@ but no validated benchmark results or final performance claims.
 
 - Human-labelled evaluation data where appropriate.
 - Controlled benchmark execution and reporting.
+- Design a separate controlled adapter for the production context-engineering pipeline before making FYP effectiveness claims.
 
 ## PLANNED
 
