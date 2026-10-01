@@ -43,7 +43,7 @@ def _normalized_key(dimension: str, question_target: str) -> tuple[str, str]:
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
 
 class Provenance(StrictModel):
@@ -135,10 +135,10 @@ class FixtureManifest(StrictModel):
     dataset_sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
     task_id: str = Field(min_length=1)
     original_task: OriginalTask
-    project_facts: list[ProjectFact] = Field(default_factory=list)
-    clarification_answers: list[ClarificationAnswer] = Field(default_factory=list)
-    frozen_documents: list[FrozenDocument] = Field(default_factory=list)
-    evaluation_only: list[EvaluationCriterion] = Field(default_factory=list)
+    project_facts: tuple[ProjectFact, ...] = ()
+    clarification_answers: tuple[ClarificationAnswer, ...] = ()
+    frozen_documents: tuple[FrozenDocument, ...] = ()
+    evaluation_only: tuple[EvaluationCriterion, ...] = ()
 
     @model_validator(mode="after")
     def validate_references(self) -> FixtureManifest:
@@ -185,8 +185,12 @@ class FixtureManifest(StrictModel):
 
     @property
     def live_eligible(self) -> bool:
+        """Schema-level review claim; external proof of human review is still required."""
+
+        validated = FixtureManifest.model_validate(self.model_dump(mode="json"))
         return (
-            self.fixture_kind == "experimental_candidate" and self.review.status == "human_approved"
+            validated.fixture_kind == "experimental_candidate"
+            and validated.review.status == "human_approved"
         )
 
     def answer_for_gap(self, gap: GapMatchKey) -> ClarificationAnswer | None:
@@ -220,9 +224,9 @@ class FrozenDocumentInput(StrictModel):
 
 class GenerationFixtureInputs(StrictModel):
     original_task: OriginalTask
-    project_facts: list[ProjectFact]
-    clarification_answers: list[ClarificationAnswer]
-    frozen_documents: list[FrozenDocumentInput]
+    project_facts: tuple[ProjectFact, ...]
+    clarification_answers: tuple[ClarificationAnswer, ...]
+    frozen_documents: tuple[FrozenDocumentInput, ...]
 
 
 def _read_document(document: FrozenDocument, manifest_path: Path) -> bytes:
@@ -240,47 +244,66 @@ def _read_document(document: FrozenDocument, manifest_path: Path) -> bytes:
 
 def validate_manifest(
     manifest: FixtureManifest, dataset: BenchmarkDataset, manifest_path: Path
-) -> None:
-    if manifest.dataset_name != dataset.name or manifest.dataset_sha256 != dataset_sha256(dataset):
+) -> FixtureManifest:
+    """Return an independent, fully checked declaration bound to this dataset."""
+
+    checked = FixtureManifest.model_validate(manifest.model_dump(mode="json"))
+    if checked.dataset_name != dataset.name or checked.dataset_sha256 != dataset_sha256(dataset):
         raise ValueError("Manifest dataset identity/hash differs from the source dataset")
     try:
-        task = dataset.task(manifest.task_id)
+        task = dataset.task(checked.task_id)
     except KeyError as exc:
         raise ValueError("Manifest references an unknown task_id") from exc
-    if manifest.original_task.content != task.task_text:
+    if checked.original_task.content != task.task_text:
         raise ValueError("Original-task content differs from the dataset task_text")
-    for document in manifest.frozen_documents:
+    for document in checked.frozen_documents:
         _read_document(document, manifest_path)
+    return checked
+
+
+def admit_live_manifest(
+    manifest: FixtureManifest, dataset: BenchmarkDataset, manifest_path: Path
+) -> FixtureManifest:
+    """Enforce technical admission; study owners must verify the review claim."""
+
+    checked = validate_manifest(manifest, dataset, manifest_path)
+    if not checked.live_eligible:
+        raise ValueError("Fixture is not eligible for live experiments")
+    return checked
 
 
 def load_fixture_manifest(path: str | Path, dataset: BenchmarkDataset) -> FixtureManifest:
     manifest_path = Path(path)
     with manifest_path.open(encoding="utf-8") as handle:
         manifest = FixtureManifest.model_validate(json.load(handle))
-    validate_manifest(manifest, dataset, manifest_path)
-    return manifest
+    return validate_manifest(manifest, dataset, manifest_path)
 
 
 def generation_inputs(
-    manifest: FixtureManifest, manifest_path: str | Path
+    manifest: FixtureManifest, dataset: BenchmarkDataset, manifest_path: str | Path
 ) -> GenerationFixtureInputs:
-    """Explicit allowlist: evaluation_only cannot appear in generation inputs."""
+    """Dataset-bound allowlist; evaluation_only cannot enter generation inputs."""
 
-    return GenerationFixtureInputs(
-        original_task=manifest.original_task,
-        project_facts=manifest.project_facts,
-        clarification_answers=manifest.clarification_answers,
-        frozen_documents=[
-            FrozenDocumentInput(
-                fixture_id=doc.fixture_id,
-                filename=doc.filename,
-                media_type=doc.media_type,
-                content=_read_document(doc, Path(manifest_path)),
-                content_sha256=doc.content_sha256,
-                provenance=doc.provenance,
-            )
-            for doc in manifest.frozen_documents
-        ],
+    checked = validate_manifest(manifest, dataset, Path(manifest_path))
+    return GenerationFixtureInputs.model_validate(
+        {
+            "original_task": checked.original_task.model_dump(mode="python"),
+            "project_facts": [item.model_dump(mode="python") for item in checked.project_facts],
+            "clarification_answers": [
+                item.model_dump(mode="python") for item in checked.clarification_answers
+            ],
+            "frozen_documents": [
+                FrozenDocumentInput(
+                    fixture_id=doc.fixture_id,
+                    filename=doc.filename,
+                    media_type=doc.media_type,
+                    content=_read_document(doc, Path(manifest_path)),
+                    content_sha256=doc.content_sha256,
+                    provenance=Provenance.model_validate(doc.provenance.model_dump(mode="python")),
+                ).model_dump(mode="python")
+                for doc in checked.frozen_documents
+            ],
+        }
     )
 
 

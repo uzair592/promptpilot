@@ -12,6 +12,8 @@ from promptpilot_backend.benchmark import load_dataset
 from promptpilot_backend.benchmark_fixtures import (
     FixtureManifest,
     GapMatchKey,
+    Review,
+    admit_live_manifest,
     generation_inputs,
     load_fixture_manifest,
     manifest_sha256,
@@ -44,8 +46,9 @@ def test_synthetic_fixture_validates_and_cannot_enter_live_study() -> None:
 
 
 def test_evaluation_only_never_enters_generation_projection() -> None:
-    manifest = load_fixture_manifest(MANIFEST_PATH, load_dataset(DATASET_PATH))
-    inputs = generation_inputs(manifest, MANIFEST_PATH)
+    dataset = load_dataset(DATASET_PATH)
+    manifest = load_fixture_manifest(MANIFEST_PATH, dataset)
+    inputs = generation_inputs(manifest, dataset, MANIFEST_PATH)
     projected = inputs.model_dump(mode="json")
     assert set(projected) == {
         "original_task",
@@ -56,6 +59,78 @@ def test_evaluation_only_never_enters_generation_projection() -> None:
     assert "SYNTHETIC_EVAL_ONLY_MARKER" not in json.dumps(projected)
     assert "SYNTHETIC_EVAL_ONLY_MARKER" in manifest.evaluation_only[0].content
     assert inputs.frozen_documents[0].content.startswith(b"SYNTHETIC TEST DOCUMENT")
+    assert inputs.original_task is not manifest.original_task
+    assert inputs.project_facts[0] is not manifest.project_facts[0]
+    assert inputs.clarification_answers[0] is not manifest.clarification_answers[0]
+    assert inputs.frozen_documents[0].provenance is not manifest.frozen_documents[0].provenance
+
+
+def test_synthetic_manifest_cannot_be_mutated_into_live_eligibility() -> None:
+    dataset = load_dataset(DATASET_PATH)
+    manifest = load_fixture_manifest(MANIFEST_PATH, dataset)
+    with pytest.raises(ValidationError, match="frozen_instance"):
+        manifest.fixture_kind = "experimental_candidate"
+    with pytest.raises(ValidationError, match="frozen_instance"):
+        manifest.review.status = "human_approved"
+    with pytest.raises(ValueError, match="not eligible for live experiments"):
+        admit_live_manifest(manifest, dataset, MANIFEST_PATH)
+
+    # Pydantic's model_copy(update=...) skips validation; every admission path checks again.
+    forged = manifest.model_copy(
+        update={
+            "fixture_kind": "experimental_candidate",
+            "review": Review(
+                status="human_approved",
+                reviewer_id="claimed-reviewer",
+                reviewed_at="2026-01-01T00:00:00Z",
+            ),
+        }
+    )
+    with pytest.raises(ValidationError, match="synthetic test sources"):
+        _ = forged.live_eligible
+    with pytest.raises(ValidationError, match="synthetic test sources"):
+        admit_live_manifest(forged, dataset, MANIFEST_PATH)
+
+
+def test_changed_original_task_cannot_enter_generation_even_with_matching_text_hash() -> None:
+    dataset = load_dataset(DATASET_PATH)
+    manifest = load_fixture_manifest(MANIFEST_PATH, dataset)
+    with pytest.raises(ValidationError, match="frozen_instance"):
+        manifest.original_task.content = "Changed task"
+    changed = manifest.original_task.model_copy(
+        update={
+            "content": "Changed task",
+            "content_sha256": hashlib.sha256(b"Changed task").hexdigest(),
+        }
+    )
+    forged = manifest.model_copy(update={"original_task": changed})
+    with pytest.raises(ValueError, match="Original-task content differs"):
+        generation_inputs(forged, dataset, MANIFEST_PATH)
+
+
+def test_nested_collection_changes_are_rejected_before_projection() -> None:
+    dataset = load_dataset(DATASET_PATH)
+    manifest = load_fixture_manifest(MANIFEST_PATH, dataset)
+    with pytest.raises(ValidationError, match="frozen_instance"):
+        manifest.project_facts += manifest.project_facts
+    with pytest.raises(ValidationError, match="frozen_instance"):
+        manifest.clarification_answers[0].gap_key.dimension = "context"
+    forged = manifest.model_copy(
+        update={"clarification_answers": manifest.clarification_answers * 2}
+    )
+    with pytest.raises(ValidationError, match="Fixture source IDs must be unique"):
+        generation_inputs(forged, dataset, MANIFEST_PATH)
+
+
+def test_stale_dataset_identity_cannot_enter_generation() -> None:
+    dataset = load_dataset(DATASET_PATH)
+    manifest = load_fixture_manifest(MANIFEST_PATH, dataset)
+    forged = manifest.model_copy(update={"dataset_sha256": "0" * 64})
+    with pytest.raises(ValueError, match="dataset identity/hash"):
+        generation_inputs(forged, dataset, MANIFEST_PATH)
+    dataset.task("planning-launch-001").task_text = "Revised dataset task"
+    with pytest.raises(ValueError, match="dataset identity/hash"):
+        generation_inputs(manifest, dataset, MANIFEST_PATH)
 
 
 def test_gap_matching_is_exact_and_unmatched_gap_stays_unanswered() -> None:

@@ -26,6 +26,14 @@ exact match independently of the hash.
 `manifest_sha256` provides a canonical digest of the parsed manifest for
 future export lineage, including its declared document checksums.
 
+Loaded manifest fields and nested source collections are immutable. Both
+`generation_inputs(manifest, dataset, manifest_path)` and
+`admit_live_manifest(manifest, dataset, manifest_path)` revalidate a fresh copy
+of the complete declaration against the supplied dataset and frozen document
+bytes. This also catches programmatic copies made through Pydantic's
+unvalidated `model_copy(update=...)`. The generation projection owns separate
+source objects; it does not share mutable references with the manifest.
+
 ## Manifest shape
 
 The complete synthetic example is
@@ -82,6 +90,9 @@ ending conversion cannot change its checksum.
   `human_approved` requires a real reviewer ID and review time, and cannot
   include synthetic-test sources. The schema records a review claim; a study
   owner must verify its authenticity and source consent outside this validator.
+  `live_eligible` expresses only that schema-level claim. Live technical
+  admission must use `admit_live_manifest` with the source dataset; it does
+  not prove that the named human performed the review.
 - All sources must reference the same known dataset task. Source IDs and gap
   keys must be unique. Unsupported schema versions, source types, document
   types, changed task text, stale dataset hashes, and changed document bytes
