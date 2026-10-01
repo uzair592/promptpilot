@@ -6,6 +6,29 @@ Status: design only. No adapter or live experiment is implemented. The existing
 experiment scope, `production_pipeline_paired_v1`, using the existing `v1`
 evaluation rubric and backend-owned weighted aggregate.
 
+The service-reuse prerequisite is implemented separately: production routes now
+use `question_service.create_question_session` and
+`question_service.skip_and_next_question`, while retaining route-level project
+authorization and the existing commit order. `analyze_hybrid` and
+`question_service.next_question` accept optional injected providers and
+`ProviderObserver` callbacks. Omitting both arguments preserves production
+provider selection. An injected provider is called even with no configured
+live credentials, enabling offline adapter tests without network access.
+
+The observer receives a `ProviderCallObservation` with purpose, safe
+provider/model labels, a SHA-256 of request material without headers or
+credentials, call start/end times, latency, `request_outcome`, `service_result`,
+and `fallback_reason`. `not_attempted` plus `not_configured` means no request;
+`failed` plus `provider_failed` means an attempted request failed and the
+service used deterministic fallback; `succeeded` plus `duplicate_question`
+means a question request succeeded but its text duplicated a prior question.
+Successful provider output rejected by question validation is recorded as
+`succeeded` plus `invalid_question`. Observer failures are ignored by product
+services. Provider construction is never counted as a request. Expected
+`reanalyze_after_answer` remains heuristic and is not a provider failure.
+These observations are in-memory callbacks only; the later orchestrator must
+persist them with its stage ledger.
+
 ## Research target and unit of isolation
 
 The unit is one dataset task in one repetition. Use the same fixed task selection

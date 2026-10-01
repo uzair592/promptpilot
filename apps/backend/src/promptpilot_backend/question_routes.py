@@ -10,7 +10,12 @@ from .dependencies import current_user
 from .memory_service import ProjectMemoryService
 from .models import Question, QuestionSession, User
 from .project_policy import ProjectRole
-from .question_service import answer_question, next_question, reanalyze_after_answer
+from .question_service import (
+    answer_question,
+    next_question,
+    reanalyze_after_answer,
+    skip_and_next_question,
+)
 from .schemas import (
     AnswerCreateRequest,
     ProjectMemoryResponse,
@@ -98,9 +103,7 @@ def skip_question(
     )
     if question is None:
         raise HTTPException(status_code=404, detail="Question not found")
-    question.status = "skipped"
-    db.commit()
-    next_item = next_question(db, session)
+    next_item = skip_and_next_question(db, session, question)
     return QuestionSessionResponse(
         id=session.id,
         status=session.status,
