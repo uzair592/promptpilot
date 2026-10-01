@@ -1,0 +1,2 @@
+SYNTHETIC TEST DOCUMENT - NOT FOR LIVE EXPERIMENTS
+The mock workshop room has 20 seats and a projector.
