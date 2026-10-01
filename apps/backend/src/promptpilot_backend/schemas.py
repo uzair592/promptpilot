@@ -178,6 +178,8 @@ class MessageListResponse(BaseModel):
 
 
 class AnalysisDimensionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     key: str
     score: int | None
     status: str
@@ -187,6 +189,8 @@ class AnalysisDimensionResponse(BaseModel):
 
 
 class InformationGapResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     dimension: str
     title: str

@@ -9,8 +9,9 @@ from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
 from .llm_provider import ProviderError
-from .models import Message, QuestionSession, User
+from .models import Message, User
 from .project_policy import ProjectRole
+from .question_service import create_question_session
 from .schemas import PromptAnalysisResponse
 
 router = APIRouter(prefix="/api/v1/conversations/{conversation_id}/messages", tags=["analysis"])
@@ -38,12 +39,7 @@ def create_analysis(
         raise HTTPException(status_code=422, detail="Only user messages can be analyzed")
     try:
         analysis = analyze_hybrid(db, project.id, conversation.id, message, mode)
-        db.add(
-            QuestionSession(
-                project_id=project.id, conversation_id=conversation.id, analysis_id=analysis.id
-            )
-        )
-        db.commit()
+        create_question_session(db, analysis)
         return PromptAnalysisResponse.model_validate(analysis)
     except ProviderError as error:
         raise HTTPException(status_code=503, detail=error.reason) from None

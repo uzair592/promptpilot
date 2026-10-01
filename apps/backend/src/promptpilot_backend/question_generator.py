@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -42,6 +43,9 @@ class QuestionGenerator(Protocol):
 
 
 class QuestionProvider(Protocol):
+    name: str
+    model: str
+
     def generate_question(self, payload: dict[str, object]) -> object: ...
 
 
@@ -49,20 +53,23 @@ class ProviderQuestionGenerator:
     def __init__(self, provider: QuestionProvider) -> None:
         self.provider = provider
 
-    def generate(self, request: QuestionGenerationInput) -> GeneratedQuestion:
-        result = self.provider.generate_question(
-            {
-                "original_prompt": request.original_prompt,
-                "task_category": request.task_category,
-                "gap_id": request.gap_id,
-                "gap_target": request.gap_target,
-                "severity": request.severity,
-                "importance": request.importance,
-                "memory": list(request.memory),
-                "previous_questions": list(request.previous_questions),
-                "previous_answers": list(request.previous_answers),
-            }
-        )
+    def generate(
+        self,
+        request: QuestionGenerationInput,
+        call_provider: Callable[[dict[str, object]], object] | None = None,
+    ) -> GeneratedQuestion:
+        payload: dict[str, object] = {
+            "original_prompt": request.original_prompt,
+            "task_category": request.task_category,
+            "gap_id": request.gap_id,
+            "gap_target": request.gap_target,
+            "severity": request.severity,
+            "importance": request.importance,
+            "memory": list(request.memory),
+            "previous_questions": list(request.previous_questions),
+            "previous_answers": list(request.previous_answers),
+        }
+        result = (call_provider or self.provider.generate_question)(payload)
         if not isinstance(result, GeneratedQuestion) or result.related_gap != request.gap_id:
             raise ValueError("Generated question did not target the selected gap")
         return result
