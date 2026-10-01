@@ -1,6 +1,6 @@
 # Controlled production-pipeline benchmark adapter: design
 
-Status: design only. No adapter or live experiment is implemented. The existing
+Status: offline adapter implemented; no live experiment is implemented. The existing
 `benchmark_infrastructure_smoke_test` and its deterministic
 `default_prompt_builder` remain unchanged. This design describes a separate
 experiment scope, `production_pipeline_paired_v1`, using the existing `v1`
@@ -26,8 +26,10 @@ Successful provider output rejected by question validation is recorded as
 `succeeded` plus `invalid_question`. Observer failures are ignored by product
 services. Provider construction is never counted as a request. Expected
 `reanalyze_after_answer` remains heuristic and is not a provider failure.
-These observations are in-memory callbacks only; the later orchestrator must
-persist them with its stage ledger.
+These observations originate as in-memory callbacks. The offline-only
+orchestrator persists them with its stage ledger;
+see [offline-production-benchmark.md](offline-production-benchmark.md). The
+offline fixture and policy are not an approved live protocol.
 
 ## Research target and unit of isolation
 
@@ -50,11 +52,10 @@ information as generation input.
 
 ## Exact production service sequence
 
-The adapter should orchestrate these existing functions, with the noted route
-logic where no standalone service exists. Direct SQL inserts are limited to the
-`QuestionSession` lifecycle currently implemented in `analysis_routes.create_analysis`;
-they must not replace document, question-answer, memory, retrieval, prompt, or
-execution services.
+The offline adapter orchestrates these existing functions. Shared question
+service functions now own session creation and skip persistence; direct SQL
+inserts do not replace document, question-answer, memory, retrieval, prompt,
+or execution services.
 
 | Step | Call and data flow | Required record |
 | --- | --- | --- |
@@ -231,7 +232,7 @@ not execute the production pipeline or admit the synthetic fixture to a live stu
    artifacts and call attempts remain inspectable. Run the unchanged smoke
    tests as a regression gate. No live calls are needed for acceptance.
 
-## Research decisions before implementation or a paid run
+## Research decisions before a live study
 
 - Which dataset context facts can a human attest as user-provided, and which
   frozen documents and exact clarification answers may be admitted? Current

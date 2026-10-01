@@ -11,7 +11,9 @@ from typing import Literal
 
 from .config import get_settings
 
-Purpose = Literal["analysis", "question"]
+Purpose = Literal[
+    "analysis", "question", "prompt_generation", "target_baseline", "target_promptpilot", "judge"
+]
 RequestOutcome = Literal["not_attempted", "succeeded", "failed"]
 FallbackReason = Literal[
     "not_configured", "provider_failed", "invalid_question", "duplicate_question"
@@ -28,7 +30,7 @@ class ProviderCallObservation:
     finished_at: datetime | None
     latency_ms: int | None
     request_outcome: RequestOutcome
-    service_result: Literal["ai", "fallback", "error"]
+    service_result: Literal["ai", "fallback", "succeeded", "error"]
     fallback_reason: FallbackReason | None = None
     error_type: str | None = None
 
