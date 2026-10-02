@@ -26,6 +26,10 @@ protocol, dataset, manifests, or documents. It never overwrites an earlier repor
 The strict `v1` model forbids extra fields and is frozen at every nested model boundary.
 Lists are represented by tuples. Admission reserializes and revalidates independent
 copies so Pydantic `model_copy(update=...)` cannot bypass invariants.
+External JSON scalars are type-strict: booleans and numeric strings cannot enter integer
+fields, numeric strings and booleans cannot enter floating-point fields, and boolean
+fields accept only JSON booleans. Timezone-aware ISO datetime strings remain supported.
+Semantic identifiers and references must contain a non-whitespace character.
 
 The protocol fixes:
 
@@ -52,6 +56,10 @@ Unresolved placeholders such as `TBD`, `unknown`, or `later` are rejected. Crede
 like field names and values are forbidden recursively, including authorization headers,
 bearer values, API keys, tokens, passwords, cookies and secrets. Validation reports use
 controlled blocker text and never copy rejected values or raw exception messages.
+Every floating-point field must also be finite. NaN and positive or negative infinity
+are rejected during parsing and independent-copy revalidation. Canonical protocol hashes
+and admission-report output use standards-compliant JSON serialization with non-finite
+output disabled explicitly.
 
 ## Fixture attestations and human boundary
 
@@ -140,3 +148,9 @@ Passing validation means only that a frozen declaration is technically complete 
 repository artifacts agree. A future live runner still needs a separately reviewed
 implementation, provider-call ledger, runtime budget enforcement and study-owner
 authorization. This validator deliberately provides none of those capabilities.
+
+The regression suite constructs a human-approved `experimental_candidate` only inside a
+temporary test directory to exercise positive technical admission. Its reviewer and
+evidence values are visibly labelled unverified unit-test claims, and the resulting
+report still sets `human_approval.externally_verified=false`. No such candidate is
+checked into the repository as authentic study evidence.

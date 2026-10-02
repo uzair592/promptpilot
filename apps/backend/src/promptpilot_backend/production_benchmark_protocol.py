@@ -14,9 +14,20 @@ import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    AfterValidator,
+    AllowInfNan,
+    BaseModel,
+    ConfigDict,
+    Field,
+    Strict,
+    StrictBool,
+    StringConstraints,
+    ValidationError,
+    model_validator,
+)
 
 from .benchmark import BenchmarkDataset, dataset_sha256, load_dataset
 from .benchmark_fixtures import (
@@ -26,11 +37,7 @@ from .benchmark_fixtures import (
     validate_manifest,
 )
 
-Sha256 = str
 EvaluationMethod = Literal["heuristic", "llm_judge"]
-ProviderRole = Literal[
-    "analysis", "question_generation", "prompt_generation", "target_execution", "judge"
-]
 
 _PLACEHOLDER = re.compile(r"(?i)(?:^|[^a-z0-9])(?:tbd|unknown|later)(?:$|[^a-z0-9])")
 _CREDENTIAL_VALUE = re.compile(
@@ -93,23 +100,39 @@ def _aware(value: datetime, label: str) -> datetime:
     return value
 
 
+def _require_non_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("Value must contain non-whitespace characters")
+    return value
+
+
+NonBlankStr = Annotated[
+    str,
+    StringConstraints(strict=True),
+    AfterValidator(_require_non_blank),
+]
+Sha256 = Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{64}$")]
+StrictInteger = Annotated[int, Strict()]
+StrictFiniteFloat = Annotated[float, Strict(), AllowInfNan(False)]
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
 
 class ProviderAssignment(StrictModel):
-    provider: str = Field(min_length=1, max_length=120)
-    model: str = Field(min_length=1, max_length=240)
+    provider: NonBlankStr = Field(max_length=120)
+    model: NonBlankStr = Field(max_length=240)
 
 
 class TargetGenerationParameters(StrictModel):
-    temperature: float = Field(ge=0, le=2)
-    max_tokens: int = Field(ge=1)
-    top_p: float = Field(gt=0, le=1)
-    seed: int | None
-    stop: tuple[str, ...]
-    presence_penalty: float = Field(ge=-2, le=2)
-    frequency_penalty: float = Field(ge=-2, le=2)
+    temperature: StrictFiniteFloat = Field(ge=0, le=2)
+    max_tokens: StrictInteger = Field(ge=1)
+    top_p: StrictFiniteFloat = Field(gt=0, le=1)
+    seed: StrictInteger | None
+    stop: tuple[NonBlankStr, ...]
+    presence_penalty: StrictFiniteFloat = Field(ge=-2, le=2)
+    frequency_penalty: StrictFiniteFloat = Field(ge=-2, le=2)
 
 
 class ProviderAssignments(StrictModel):
@@ -132,7 +155,7 @@ class ComparisonPolicy(StrictModel):
 
 class AnalysisStratum(StrictModel):
     name: Literal["strict_ai_backed", "hybrid_product_behavior"]
-    fallback_containing_runs_admissible: bool
+    fallback_containing_runs_admissible: StrictBool
 
 
 class EvaluationPlan(StrictModel):
@@ -151,41 +174,54 @@ class EvaluationPlan(StrictModel):
 
 
 class RoleCallBudget(StrictModel):
-    analysis: int = Field(ge=0)
-    question_generation: int = Field(ge=0)
-    prompt_generation: int = Field(ge=0)
-    target_execution: int = Field(ge=0)
-    judge: int = Field(ge=0)
+    analysis: StrictInteger = Field(ge=0)
+    question_generation: StrictInteger = Field(ge=0)
+    prompt_generation: StrictInteger = Field(ge=0)
+    target_execution: StrictInteger = Field(ge=0)
+    judge: StrictInteger = Field(ge=0)
 
 
 class ProviderCallBudgets(StrictModel):
     by_role: RoleCallBudget
-    total: int = Field(ge=0)
+    total: StrictInteger = Field(ge=0)
 
 
 class MonetaryBudget(StrictModel):
-    currency: str = Field(pattern=r"^[A-Z]{3}$")
-    maximum_cost: float = Field(ge=0)
-    pricing_snapshot_reference: str = Field(min_length=1)
+    currency: Annotated[str, StringConstraints(strict=True, pattern=r"^[A-Z]{3}$")]
+    maximum_cost: StrictFiniteFloat = Field(ge=0)
+    pricing_snapshot_reference: NonBlankStr
 
 
 class StopRules(StrictModel):
-    stop_on_budget_exhaustion: Literal[True]
-    stop_on_manifest_change: Literal[True]
-    stop_on_incomplete_treatment_preparation: Literal[True]
-    stop_on_target_failure: Literal[True]
-    stop_on_judge_failure: Literal[True]
-    maximum_consecutive_provider_failures: int = Field(ge=1)
+    stop_on_budget_exhaustion: StrictBool
+    stop_on_manifest_change: StrictBool
+    stop_on_incomplete_treatment_preparation: StrictBool
+    stop_on_target_failure: StrictBool
+    stop_on_judge_failure: StrictBool
+    maximum_consecutive_provider_failures: StrictInteger = Field(ge=1)
+
+    @model_validator(mode="after")
+    def required_stops(self) -> StopRules:
+        stop_values = (
+            self.stop_on_budget_exhaustion,
+            self.stop_on_manifest_change,
+            self.stop_on_incomplete_treatment_preparation,
+            self.stop_on_target_failure,
+            self.stop_on_judge_failure,
+        )
+        if not all(stop_values):
+            raise ValueError("All fail-closed stop rules must be true")
+        return self
 
 
 class FixtureReviewAttestation(StrictModel):
     attestation_version: Literal["v1"]
-    fixture_id: str = Field(min_length=1)
-    manifest_sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
-    reviewer_id: str = Field(min_length=1)
+    fixture_id: NonBlankStr
+    manifest_sha256: Sha256
+    reviewer_id: NonBlankStr
     reviewed_at: datetime
-    provenance_consent_evidence_reference: str = Field(min_length=1)
-    test_only: bool
+    provenance_consent_evidence_reference: NonBlankStr
+    test_only: StrictBool
 
     @model_validator(mode="after")
     def timezone_required(self) -> FixtureReviewAttestation:
@@ -194,9 +230,9 @@ class FixtureReviewAttestation(StrictModel):
 
 
 class SelectedFixture(StrictModel):
-    fixture_id: str = Field(min_length=1)
-    manifest_path: str = Field(min_length=1)
-    manifest_sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
+    fixture_id: NonBlankStr
+    manifest_path: NonBlankStr
+    manifest_sha256: Sha256
     attestation: FixtureReviewAttestation
 
     @model_validator(mode="after")
@@ -214,7 +250,7 @@ class SelectedFixture(StrictModel):
 
 class ProtocolReview(StrictModel):
     status: Literal["draft", "pending", "locked"]
-    reviewer_id: str | None
+    reviewer_id: NonBlankStr | None
     locked_at: datetime | None
 
     @model_validator(mode="after")
@@ -230,14 +266,16 @@ class ProtocolReview(StrictModel):
 
 class LiveStudyProtocol(StrictModel):
     schema_version: Literal["v1"]
-    protocol_id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]+$")
-    study_title: str = Field(min_length=1, max_length=300)
-    study_version: str = Field(min_length=1, max_length=80)
-    dataset_name: str = Field(min_length=1)
-    dataset_sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
+    protocol_id: Annotated[
+        str, StringConstraints(strict=True, pattern=r"^[a-z0-9][a-z0-9._-]+$")
+    ]
+    study_title: NonBlankStr = Field(max_length=300)
+    study_version: NonBlankStr = Field(max_length=80)
+    dataset_name: NonBlankStr
+    dataset_sha256: Sha256
     selected_fixtures: tuple[SelectedFixture, ...] = Field(min_length=1)
-    repetitions: int = Field(ge=1)
-    question_cap: int = Field(ge=0, le=50)
+    repetitions: StrictInteger = Field(ge=1)
+    question_cap: StrictInteger = Field(ge=0, le=50)
     comparison_policy: ComparisonPolicy
     analysis_stratum: AnalysisStratum
     generation_mode: Literal["structured", "minimal", "detailed"]
@@ -313,9 +351,14 @@ class AdmissionReport(StrictModel):
 
 
 def protocol_sha256(protocol: LiveStudyProtocol) -> str:
-    checked = LiveStudyProtocol.model_validate(protocol.model_dump(mode="json"))
+    checked = LiveStudyProtocol.model_validate(
+        protocol.model_dump(mode="python", warnings=False)
+    )
     canonical = json.dumps(
-        checked.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        checked.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
@@ -323,7 +366,9 @@ def protocol_sha256(protocol: LiveStudyProtocol) -> str:
 def calculate_call_ceiling(protocol: LiveStudyProtocol) -> CallCeiling:
     """Calculate the conservative ceiling for all proposed fixture/repetition units."""
 
-    checked = LiveStudyProtocol.model_validate(protocol.model_dump(mode="json"))
+    checked = LiveStudyProtocol.model_validate(
+        protocol.model_dump(mode="python", warnings=False)
+    )
     fixture_count = len(checked.selected_fixtures)
     units = fixture_count * checked.repetitions
     roles = RoleCallBudget(
@@ -383,8 +428,12 @@ def admit_protocol(
 ) -> AdmissionReport:
     """Validate technical readiness without verifying human claims or running providers."""
 
-    checked = LiveStudyProtocol.model_validate(protocol.model_dump(mode="json"))
-    dataset_checked = BenchmarkDataset.model_validate(dataset.model_dump(mode="json"))
+    checked = LiveStudyProtocol.model_validate(
+        protocol.model_dump(mode="python", warnings=False)
+    )
+    dataset_checked = BenchmarkDataset.model_validate(
+        dataset.model_dump(mode="python", warnings=False)
+    )
     path = Path(protocol_path)
     blockers: list[AdmissionBlocker] = []
     admitted: list[str] = []
@@ -535,9 +584,18 @@ def _structural_failure(code: str, message: str) -> AdmissionReport:
 
 
 def _write_reserved(handle: Any, report: AdmissionReport) -> None:
+    checked = AdmissionReport.model_validate(
+        report.model_dump(mode="python", warnings=False)
+    )
     handle.seek(0)
     handle.truncate()
-    json.dump(report.model_dump(mode="json"), handle, indent=2, sort_keys=True)
+    json.dump(
+        checked.model_dump(mode="json"),
+        handle,
+        indent=2,
+        sort_keys=True,
+        allow_nan=False,
+    )
     handle.write("\n")
     handle.flush()
     os.fsync(handle.fileno())
