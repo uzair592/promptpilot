@@ -95,3 +95,20 @@ consent, create approved fixtures, or authorize a study. Before a live runner ex
 external human approval and provenance must be verified, provider access and spending
 must be explicitly authorized, operational recovery and monitoring must be reviewed, and
 the runner itself must preserve the admitted protocol, ledger, and evidence boundaries.
+
+## Research status
+
+**Benchmark infrastructure: IMPLEMENTED**
+
+**Benchmark safety/budget ledger: IMPLEMENTED AND OFFLINE-VALIDATED**
+
+**Controlled live pilot: NOT RUN**
+
+**Validated benchmark results: NOT ESTABLISHED**
+
+**General PromptPilot superiority claim: NOT MADE**
+
+The ledger proves experiment-safety and accounting correctness. It does not provide
+evidence about PromptPilot response quality, statistical significance, or FYP
+effectiveness. The next research gate is human-reviewed protocol admission, not another
+software feature.

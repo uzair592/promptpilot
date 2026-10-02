@@ -77,8 +77,23 @@ but no validated benchmark results or final performance claims.
   role assignments, safe artifact hashes, lifecycle outcomes, and budget counters.
 - Atomic conditional reservation and database uniqueness enforce per-role/total ceilings
   and retry idempotency, including concurrent contention for the final slot.
-- Status: TECHNICAL ACCOUNTING IMPLEMENTED. No provider is constructed or called, and
-  external approval remains explicitly unverified.
+- Staging requires the declared budget to equal the calculated ceiling exactly; both
+  too-low and too-high totals are rejected. Termination claims the run state with a
+  conditional database update so a concurrent reservation cannot cross the terminal
+  boundary. Attempt identity is immutable after creation.
+- Status: TECHNICAL ACCOUNTING IMPLEMENTED AND OFFLINE-HARDENED. No provider is
+  constructed or called, external approval remains explicitly unverified, and
+  PostgreSQL production validation has not been performed.
+
+**Benchmark infrastructure: IMPLEMENTED**
+
+**Benchmark safety/budget ledger: IMPLEMENTED AND OFFLINE-VALIDATED**
+
+**Controlled live pilot: NOT RUN**
+
+**Validated benchmark results: NOT ESTABLISHED**
+
+**General PromptPilot superiority claim: NOT MADE**
 
 ### Phase G: minimal product shell
 

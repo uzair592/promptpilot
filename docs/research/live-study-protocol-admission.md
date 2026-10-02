@@ -25,6 +25,23 @@ The checked-in example is synthetic and test-only, so the command intentionally 
 must exist. The validator exclusively reserves and probes the output before it loads the
 protocol, dataset, manifests, or documents. It never overwrites an earlier report.
 
+## Human approval gate
+
+`external_human_approval_verified` is the single field that separates technical
+configuration from an authorized live study. It is deliberately locked to `false`:
+
+* the ledger service hardcodes it on every staged run,
+* the database CHECK constraint `external_human_approval_verified = false` rejects any
+  row that tries to set it true,
+* `HumanApprovalBoundary` raises if `externally_verified=True` is ever submitted to the
+  validator.
+
+The automated system may verify that an approval claim exists and is internally
+consistent. It must not manufacture the approval. Tests passing, an AI agent declaring
+readiness, a fixture existing, or the protocol being syntactically valid never sets this
+field. Only an actual human review step that sets the field through an out-of-band,
+auditable process can make it true, and that step is not implemented in this repository.
+
 ## Schema and frozen policies
 
 The strict `v1` model forbids extra fields and is frozen at every nested model boundary.
@@ -165,3 +182,17 @@ temporary test directory to exercise positive technical admission. Its reviewer 
 evidence values are visibly labelled unverified unit-test claims, and the resulting
 report still sets `human_approval.externally_verified=false`. No such candidate is
 checked into the repository as authentic study evidence.
+
+## Offline vs live semantics
+
+Four layers must stay distinct:
+
+* **offline fixture / synthetic test** — deterministic unit-test inputs admitted only
+  because `execution_mode=offline_fixture`. They prove software correctness, not study
+  readiness.
+* **offline benchmark validation** — protocol admission, ledger staging, and reservation
+  gates prove experiment-safety infrastructure. They cannot authorize provider use.
+* **live experiment** — requires human-reviewed protocol admission, external approval,
+  provider authorization, and a separate live adapter. It has not been run.
+* **research result** — no validated benchmark results, statistical significance, or
+  PromptPilot superiority claim exists yet.
