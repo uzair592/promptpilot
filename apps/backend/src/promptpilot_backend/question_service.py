@@ -200,11 +200,17 @@ def skip_and_next_question(
 ) -> Question | None:
     """Commit the skip before selecting the next unresolved gap."""
 
+    mark_question_skipped(db, session, question)
+    return next_question(db, session, provider=provider, observer=observer)
+
+
+def mark_question_skipped(db: Session, session: QuestionSession, question: Question) -> None:
+    """Persist a skip without generating another question beyond a fixed cap."""
+
     if question.session_id != session.id:
         raise ValueError("Question does not belong to the session")
     question.status = "skipped"
     db.commit()
-    return next_question(db, session, provider=provider, observer=observer)
 
 
 def answer_question(db: Session, question: Question, content: str) -> Answer:
