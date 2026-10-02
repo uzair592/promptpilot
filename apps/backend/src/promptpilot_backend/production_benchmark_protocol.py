@@ -12,7 +12,6 @@ import json
 import os
 import re
 from collections.abc import Mapping, Sequence
-from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -31,6 +30,7 @@ from pydantic import (
 
 from .benchmark import BenchmarkDataset, dataset_sha256, load_dataset
 from .benchmark_fixtures import (
+    AwareISODateTime,
     FixtureManifest,
     admit_live_manifest,
     manifest_sha256,
@@ -92,12 +92,6 @@ def _walk_declaration(value: Any) -> None:
             raise ValueError("Unresolved placeholder values are forbidden in protocol data")
         if _CREDENTIAL_VALUE.search(value):
             raise ValueError("Credential-like values are forbidden in protocol data")
-
-
-def _aware(value: datetime, label: str) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
-        raise ValueError(f"{label} must include a timezone")
-    return value
 
 
 def _require_non_blank(value: str) -> str:
@@ -219,15 +213,9 @@ class FixtureReviewAttestation(StrictModel):
     fixture_id: NonBlankStr
     manifest_sha256: Sha256
     reviewer_id: NonBlankStr
-    reviewed_at: datetime
+    reviewed_at: AwareISODateTime
     provenance_consent_evidence_reference: NonBlankStr
     test_only: StrictBool
-
-    @model_validator(mode="after")
-    def timezone_required(self) -> FixtureReviewAttestation:
-        _aware(self.reviewed_at, "Attestation reviewed_at")
-        return self
-
 
 class SelectedFixture(StrictModel):
     fixture_id: NonBlankStr
@@ -251,14 +239,13 @@ class SelectedFixture(StrictModel):
 class ProtocolReview(StrictModel):
     status: Literal["draft", "pending", "locked"]
     reviewer_id: NonBlankStr | None
-    locked_at: datetime | None
+    locked_at: AwareISODateTime | None
 
     @model_validator(mode="after")
     def validate_lock(self) -> ProtocolReview:
         if self.status == "locked":
             if not self.reviewer_id or self.locked_at is None:
                 raise ValueError("Locked protocol review requires reviewer_id and locked_at")
-            _aware(self.locked_at, "Protocol locked_at")
         elif self.reviewer_id is not None or self.locked_at is not None:
             raise ValueError("Protocol reviewer_id and locked_at are only valid when locked")
         return self
@@ -318,10 +305,10 @@ class LiveStudyProtocol(StrictModel):
 
 
 class CallCeiling(StrictModel):
-    fixture_count: int
-    unit_count: int
+    fixture_count: StrictInteger
+    unit_count: StrictInteger
     by_role: RoleCallBudget
-    total: int
+    total: StrictInteger
 
 
 class AdmissionBlocker(StrictModel):
@@ -332,15 +319,21 @@ class AdmissionBlocker(StrictModel):
 
 
 class HumanApprovalBoundary(StrictModel):
-    externally_verified: Literal[False] = False
+    externally_verified: StrictBool = False
     statement: str
+
+    @model_validator(mode="after")
+    def remains_externally_unverified(self) -> HumanApprovalBoundary:
+        if self.externally_verified:
+            raise ValueError("External human verification cannot be asserted by this validator")
+        return self
 
 
 class AdmissionReport(StrictModel):
     schema_version: Literal["v1"] = "v1"
     protocol_id: str | None
-    technical_ready: bool
-    ready: bool
+    technical_ready: StrictBool
+    ready: StrictBool
     protocol_sha256: str | None
     dataset_sha256: str | None
     admitted_fixture_ids: tuple[str, ...]

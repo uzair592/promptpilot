@@ -30,6 +30,10 @@ External JSON scalars are type-strict: booleans and numeric strings cannot enter
 fields, numeric strings and booleans cannot enter floating-point fields, and boolean
 fields accept only JSON booleans. Timezone-aware ISO datetime strings remain supported.
 Semantic identifiers and references must contain a non-whitespace character.
+Fixture review, attestation review and protocol lock timestamps accept only timezone-aware
+ISO-8601 strings at the JSON boundary. Trusted internal revalidation may pass actual
+timezone-aware `datetime` objects. Unix numbers, booleans, numeric strings, non-finite
+numbers, malformed values and timezone-naive strings are rejected rather than converted.
 
 The protocol fixes:
 
@@ -60,6 +64,9 @@ Every floating-point field must also be finite. NaN and positive or negative inf
 are rejected during parsing and independent-copy revalidation. Canonical protocol hashes
 and admission-report output use standards-compliant JSON serialization with non-finite
 output disabled explicitly.
+Admission report readiness flags are strict booleans, and call-ceiling counts are strict
+integers. Independent report revalidation rejects model-copy substitutions instead of
+normalizing integers into booleans or booleans, strings and floats into integers.
 
 ## Fixture attestations and human boundary
 

@@ -147,6 +147,65 @@ def test_temporary_unverified_candidate_passes_only_technical_admission(
     assert "does not authorize" in report.authorization_statement
 
 
+def test_timezone_aware_iso_timestamps_survive_revalidation_and_hashing(
+    tmp_path: Path,
+) -> None:
+    protocol, protocol_path, _ = positive_protocol(tmp_path)
+    revalidated = LiveStudyProtocol.model_validate(
+        protocol.model_dump(mode="python", warnings=False)
+    )
+    assert revalidated.review.locked_at is not None
+    assert revalidated.review.locked_at.utcoffset() is not None
+    assert revalidated.selected_fixtures[0].attestation.reviewed_at.utcoffset() is not None
+    assert protocol_sha256(revalidated) == protocol_sha256(protocol)
+    assert admit_protocol(revalidated, load_dataset(DATASET), protocol_path).ready is True
+
+
+@pytest.mark.parametrize("value", [0, 0.0, True, "0", float("nan"), float("inf")])
+def test_attestation_review_timestamp_rejects_non_iso_scalars(value: object) -> None:
+    data = protocol_data()
+    data["selected_fixtures"][0]["attestation"]["reviewed_at"] = value
+    with pytest.raises(ValidationError, match="timezone-aware ISO-8601"):
+        parsed(data)
+
+
+@pytest.mark.parametrize("value", [0, 0.0, False, "0", float("nan"), float("inf")])
+def test_protocol_lock_timestamp_rejects_non_iso_scalars(value: object) -> None:
+    data = protocol_data()
+    data["review"]["locked_at"] = value
+    with pytest.raises(ValidationError, match="timezone-aware ISO-8601"):
+        parsed(data)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("selected_fixtures", 0, "attestation", "reviewed_at"), "2026-02-01T12:00:00"),
+        (("review", "locked_at"), "2026-02-01T12:00:00"),
+    ],
+)
+def test_protocol_timestamps_reject_timezone_naive_iso_strings(path, value) -> None:
+    data = protocol_data()
+    target = data
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    with pytest.raises(ValidationError, match="include a timezone"):
+        parsed(data)
+
+
+def test_numeric_timestamp_in_referenced_manifest_cannot_be_ready(tmp_path: Path) -> None:
+    protocol, protocol_path, _ = positive_protocol(tmp_path)
+    manifest_path = tmp_path / protocol.selected_fixtures[0].manifest_path
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_data["review"]["reviewed_at"] = 0
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    report = admit_protocol(protocol, load_dataset(DATASET), protocol_path)
+    assert report.ready is False and report.technical_ready is False
+    assert any(blocker.code == "fixture_validation_failed" for blocker in report.blockers)
+
+
 @pytest.mark.parametrize(
     ("path", "value"),
     [
@@ -508,6 +567,67 @@ def test_non_finite_value_cannot_enter_serialized_admission_report(tmp_path: Pat
         with pytest.raises(ValidationError):
             _write_reserved(handle, forged_report)
     assert output.read_text(encoding="utf-8") == ""
+
+
+def test_forged_report_scalar_types_are_rejected_before_serialization(
+    tmp_path: Path,
+) -> None:
+    report = admit_protocol(parsed(), load_dataset(DATASET), PROTOCOL)
+    assert report.call_ceiling is not None
+    forged_reports = [
+        report.model_copy(update={"technical_ready": 1}),
+        report.model_copy(update={"ready": 0}),
+        report.model_copy(
+            update={
+                "human_approval": report.human_approval.model_copy(
+                    update={"externally_verified": 0}
+                )
+            }
+        ),
+        report.model_copy(
+            update={
+                "call_ceiling": report.call_ceiling.model_copy(
+                    update={"fixture_count": True}
+                )
+            }
+        ),
+        report.model_copy(
+            update={
+                "call_ceiling": report.call_ceiling.model_copy(
+                    update={"unit_count": "2"}
+                )
+            }
+        ),
+        report.model_copy(
+            update={
+                "call_ceiling": report.call_ceiling.model_copy(update={"total": 12.0})
+            }
+        ),
+    ]
+    for index, forged in enumerate(forged_reports):
+        output = tmp_path / f"forged-report-{index}.json"
+        with output.open("x+", encoding="utf-8") as handle:
+            with pytest.raises(ValidationError):
+                _write_reserved(handle, forged)
+        assert output.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("value", [0, 0.0, True, "0", float("nan"), float("inf")])
+def test_timestamp_model_copy_bypass_is_rejected(value: object, tmp_path: Path) -> None:
+    protocol, protocol_path, _ = positive_protocol(tmp_path)
+    selection = protocol.selected_fixtures[0]
+    forged_attestation = selection.attestation.model_copy(update={"reviewed_at": value})
+    forged_selection = selection.model_copy(update={"attestation": forged_attestation})
+    forged_attestation_protocol = protocol.model_copy(
+        update={"selected_fixtures": (forged_selection,)}
+    )
+    with pytest.raises(ValidationError, match="timezone-aware ISO-8601"):
+        admit_protocol(forged_attestation_protocol, load_dataset(DATASET), protocol_path)
+
+    forged_review = protocol.review.model_copy(update={"locked_at": value})
+    forged_review_protocol = protocol.model_copy(update={"review": forged_review})
+    with pytest.raises(ValidationError, match="timezone-aware ISO-8601"):
+        protocol_sha256(forged_review_protocol)
 
 
 def test_positive_admission_mismatches_cannot_be_forged_with_model_copy(

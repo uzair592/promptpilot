@@ -10,9 +10,16 @@ import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 from .analyzer_service import DIMENSIONS
 from .benchmark import BenchmarkDataset, dataset_sha256, load_dataset
@@ -42,8 +49,32 @@ def _normalized_key(dimension: str, question_target: str) -> tuple[str, str]:
     return (dimension.strip().casefold(), " ".join(question_target.split()).casefold())
 
 
+def _parse_aware_iso_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("Timestamp must be a timezone-aware ISO-8601 string")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("Timestamp must be a timezone-aware ISO-8601 string") from exc
+
+
+def _require_timezone(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("Timestamp must include a timezone")
+    return value
+
+
+AwareISODateTime = Annotated[
+    datetime,
+    BeforeValidator(_parse_aware_iso_datetime),
+    AfterValidator(_require_timezone),
+]
+
+
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
 
 class Provenance(StrictModel):
@@ -123,7 +154,7 @@ class EvaluationCriterion(TextSource):
 class Review(StrictModel):
     status: Literal["synthetic", "pending", "human_approved"]
     reviewer_id: str | None = None
-    reviewed_at: datetime | None = None
+    reviewed_at: AwareISODateTime | None = None
 
 
 class FixtureManifest(StrictModel):
@@ -187,7 +218,9 @@ class FixtureManifest(StrictModel):
     def live_eligible(self) -> bool:
         """Schema-level review claim; external proof of human review is still required."""
 
-        validated = FixtureManifest.model_validate(self.model_dump(mode="json"))
+        validated = FixtureManifest.model_validate(
+            self.model_dump(mode="python", warnings=False)
+        )
         return (
             validated.fixture_kind == "experimental_candidate"
             and validated.review.status == "human_approved"
@@ -207,8 +240,14 @@ class FixtureManifest(StrictModel):
 def manifest_sha256(manifest: FixtureManifest) -> str:
     """Stable identity for the validated declaration, including source checksums."""
 
+    checked = FixtureManifest.model_validate(
+        manifest.model_dump(mode="python", warnings=False)
+    )
     canonical = json.dumps(
-        manifest.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        checked.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
@@ -247,7 +286,9 @@ def validate_manifest(
 ) -> FixtureManifest:
     """Return an independent, fully checked declaration bound to this dataset."""
 
-    checked = FixtureManifest.model_validate(manifest.model_dump(mode="json"))
+    checked = FixtureManifest.model_validate(
+        manifest.model_dump(mode="python", warnings=False)
+    )
     if checked.dataset_name != dataset.name or checked.dataset_sha256 != dataset_sha256(dataset):
         raise ValueError("Manifest dataset identity/hash differs from the source dataset")
     try:
