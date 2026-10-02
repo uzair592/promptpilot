@@ -34,8 +34,11 @@ results exist.
 - `evaluation_service.py`: deterministic heuristic evaluation plus optional LLM-judge path for response comparison.
 - `benchmark.py`: validated task dataset, isolated paired execution, repeated-run records, and JSON/CSV export. Its current pilot uses a deterministic dataset template with the existing `promptpilot` execution strategy and is an infrastructure smoke test, not an execution of the production context-engineering pipeline.
 - `production_benchmark_protocol.py`: strict frozen live-study declaration, dataset/manifest/document admission, fixture attestations, deterministic call ceilings, and an offline machine-readable readiness report. It has no provider construction or execution path.
+- `benchmark_call_ledger.py`: durable experiment-run and provider-attempt lifecycle services, admitted-protocol binding, idempotency, and atomic per-role/total reservation gates. It has no provider dependency or execution path.
 
 ### Data model highlights
+
+- `BenchmarkExperimentRun` and `BenchmarkProviderCallAttempt` preserve frozen study bindings, call budgets, lifecycle state, safe artifact hashes, and sanitized outcomes without storing credentials or raw prompts/responses.
 
 - `User`, `SessionToken`, `Project`, `ProjectMember`, `Conversation`, `Message`, `QuestionSession`, `Question`, `Answer`, `ProjectMemoryItem`
 - `PromptAnalysis`, `PromptAnalysisDimension`, `InformationGap`

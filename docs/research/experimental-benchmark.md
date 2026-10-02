@@ -104,11 +104,25 @@ and template condition only, not evidence for the full FYP pipeline.
 provenance fields, hashing, exports, evaluation integration, and deterministic
 mock tests are implemented.
 
-**Validated full-pipeline results: NOT YET AVAILABLE.** No real-provider
+**Benchmark safety/budget ledger: IMPLEMENTED AND OFFLINE-VALIDATED.** A durable
+provider-call ledger binds staged runs to a technically ready admission report and
+reserves every provider call atomically before any external invocation. It enforces
+exact per-role and total ceilings, idempotent retries, immutable attempt identity,
+terminal-state protection, and database-enforced concurrency. It constructs no
+provider, stores no credentials, and records external human approval as unverified.
+
+**Controlled live pilot: NOT RUN.** No real provider has been called and no API
+credits have been consumed.
+
+**Validated benchmark results: NOT ESTABLISHED.** No real-provider
 experiment results or superiority claims are reported. The next research
 milestone is a separately designed adapter that runs the production
 context-engineering pipeline under a controlled paired protocol, with
 appropriate human review and labels. It is outside this smoke test.
+
+**General PromptPilot superiority claim: NOT MADE.** Offline scores from the
+smoke test or the ledger cannot support response-quality, statistical, or FYP
+effectiveness claims.
 
 ## Fixed controlled pilot
 

@@ -9,6 +9,9 @@ evaluation rubric and backend-owned weighted aggregate.
 
 The separate typed protocol contract and fail-closed offline admission report are
 documented in [live-study-protocol-admission.md](live-study-protocol-admission.md).
+Durable run accounting and atomic call reservation are documented in
+[benchmark-provider-call-ledger.md](benchmark-provider-call-ledger.md); that layer still
+does not execute or authorize live provider calls.
 Protocol validation freezes study-owner choices, verifies fixture declarations through
 the existing dataset-bound and live-manifest boundaries, and checks worst-case provider
 budgets. It does not construct a provider or establish that human review, consent,

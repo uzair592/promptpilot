@@ -75,3 +75,8 @@ the analysis stratum must be fixed and documented. A later live adapter needs
 its own entry point, approved manifest admission, durable provider-call ledger
 and failure policy, plus review of full pipeline results. Offline scores from
 this runner cannot support superiority or full FYP effectiveness claims.
+
+The durable technical ledger is now implemented separately and documented in
+[benchmark-provider-call-ledger.md](benchmark-provider-call-ledger.md). It enforces
+admitted bindings and call ceilings but does not turn this offline runner into a live
+runner or establish external approval.
