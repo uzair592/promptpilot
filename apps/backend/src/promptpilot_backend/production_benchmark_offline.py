@@ -92,6 +92,7 @@ class OfflinePolicy(BaseModel):
 
     question_cap: int = Field(ge=0, le=50)
     unmatched_gap: Literal["stop", "skip"]
+    unanswered_question: Literal["stop", "skip"] = "skip"
     fallback: Literal["reject", "allow"]
     generation_mode: Literal["structured", "minimal", "detailed"]
     evaluation_method: Literal["heuristic", "llm_judge"]
@@ -405,6 +406,35 @@ class OfflinePipelineBenchmark:
             is not None
         )
 
+    @staticmethod
+    def _unresolved_gap_details(db: Session, session: QuestionSession) -> list[dict[str, Any]]:
+        """Return explicit unresolved records for gaps left open at the question cap."""
+
+        resolved = select(Question.gap_id).where(
+            Question.session_id == session.id,
+            Question.status.in_(("answered", "skipped", "dismissed", "obsolete")),
+        )
+        gaps = db.scalars(
+            select(InformationGap)
+            .where(
+                InformationGap.analysis_id
+                == (session.latest_analysis_id or session.analysis_id),
+                InformationGap.status.in_(("unresolved", "partially_resolved")),
+                InformationGap.id.not_in(resolved),
+            )
+            .order_by(InformationGap.importance, InformationGap.dimension, InformationGap.id)
+        ).all()
+        return [
+            {
+                "gap_id": str(gap.id),
+                "dimension": gap.dimension,
+                "question_target": gap.question_target,
+                "gap_status": gap.status,
+                "resolution": "unanswered",
+            }
+            for gap in gaps
+        ]
+
     def _next(
         self,
         db: Session,
@@ -673,6 +703,16 @@ class OfflinePipelineBenchmark:
                             "question_target": gap.question_target,
                         }
                     )
+                    record.artifacts.setdefault("unanswered_questions", []).append(
+                        {
+                            "question_id": str(question.id),
+                            "gap_id": str(gap.id),
+                            "question_text": question.text,
+                            "dimension": gap.dimension,
+                            "resolution": policy.unanswered_question,
+                            "reason": "no_matching_fixture_answer",
+                        }
+                    )
                     if policy.unmatched_gap == "stop":
                         break
                     if presented == policy.question_cap:
@@ -724,6 +764,8 @@ class OfflinePipelineBenchmark:
                 if fallback_seen
                 else "succeeded"
             )
+            if missing_answer or remaining:
+                record.artifacts["unresolved_gaps"] = self._unresolved_gap_details(db, session)
             self._mark(store, record, current, stage_status)
             if missing_answer:
                 raise PartialUnit("unmatched_gap_no_fixture_answer")

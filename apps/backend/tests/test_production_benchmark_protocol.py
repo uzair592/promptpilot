@@ -1,5 +1,6 @@
 """Fail-closed admission tests for the future live-study protocol."""
 
+import copy
 import json
 from datetime import timedelta
 from pathlib import Path
@@ -87,6 +88,61 @@ def positive_protocol(tmp_path: Path) -> tuple[LiveStudyProtocol, Path, str]:
     protocol_path = tmp_path / "unverified_unit_test_protocol.json"
     protocol_path.write_text(json.dumps(data), encoding="utf-8")
     return parsed(data), protocol_path, fixture_id
+
+
+def test_frozen_fixture_protocol_uses_approved_skip_policies() -> None:
+    policy = parsed().comparison_policy
+    assert policy.unmatched_gap == "skip"
+    assert policy.unanswered_question == "skip"
+    assert policy.fallback_admission == "reject"
+    assert policy.baseline_input == "exact_original_task"
+    assert policy.execution_order == "alternating_paired"
+    assert policy.unit_isolation == "task_repetition"
+    assert policy.incomplete_pair_evaluation == "prohibited"
+
+
+def production_shape_protocol() -> dict[str, object]:
+    """Build the frozen production_pipeline_paired_v1 shape (F=8, R=3, Q=2, J=1)."""
+
+    data = protocol_data()
+    data["study_title"] = "Unverified production-shape budget test"
+    base_selection = data["selected_fixtures"][0]
+    selections = []
+    for index in range(1, 9):
+        selection = copy.deepcopy(base_selection)
+        fixture_id = f"unverified-unit-test-task-{index:02d}"
+        selection["fixture_id"] = fixture_id
+        selection["attestation"]["fixture_id"] = fixture_id
+        selections.append(selection)
+    data["selected_fixtures"] = selections
+    data["repetitions"] = 3
+    data["question_cap"] = 2
+    data["evaluation"] = {"primary": "llm_judge", "secondary": None}
+    data["providers"]["judge"] = {"provider": "offline-test", "model": "judge-test-model"}
+    return data
+
+
+def test_production_paired_call_budget_is_exactly_168_with_no_hidden_calls() -> None:
+    ceiling = calculate_call_ceiling(parsed(production_shape_protocol()))
+    assert ceiling.fixture_count == 8
+    assert ceiling.unit_count == 24
+    assert ceiling.by_role.model_dump() == {
+        "analysis": 24,
+        "question_generation": 48,
+        "prompt_generation": 24,
+        "target_execution": 48,
+        "judge": 24,
+    }
+    assert ceiling.total == 168
+
+
+def test_production_shape_has_no_secondary_evaluator_and_identical_targets() -> None:
+    protocol = parsed(production_shape_protocol())
+    assert protocol.evaluation.primary == "llm_judge"
+    assert protocol.evaluation.secondary is None
+    assert protocol.providers.baseline_target == protocol.providers.promptpilot_target
+    assert protocol.baseline_target_parameters == protocol.promptpilot_target_parameters
+    assert protocol.call_budgets.by_role.judge == 0
 
 
 def test_complete_test_contract_is_structural_but_synthetic_is_never_live_ready() -> None:

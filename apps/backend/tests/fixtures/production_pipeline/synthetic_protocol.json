@@ -28,7 +28,8 @@
     "execution_order": "alternating_paired",
     "unit_isolation": "task_repetition",
     "incomplete_pair_evaluation": "prohibited",
-    "unmatched_gap": "stop",
+    "unmatched_gap": "skip",
+    "unanswered_question": "skip",
     "fallback_admission": "reject"
   },
   "analysis_stratum": {
