@@ -1,10 +1,18 @@
 # Controlled production-pipeline benchmark adapter: design
 
-Status: offline adapter implemented; no live experiment is implemented. The existing
+Status: offline adapter and live-study protocol admission validator implemented; no live
+experiment or live runner is implemented. The existing
 `benchmark_infrastructure_smoke_test` and its deterministic
 `default_prompt_builder` remain unchanged. This design describes a separate
 experiment scope, `production_pipeline_paired_v1`, using the existing `v1`
 evaluation rubric and backend-owned weighted aggregate.
+
+The separate typed protocol contract and fail-closed offline admission report are
+documented in [live-study-protocol-admission.md](live-study-protocol-admission.md).
+Protocol validation freezes study-owner choices, verifies fixture declarations through
+the existing dataset-bound and live-manifest boundaries, and checks worst-case provider
+budgets. It does not construct a provider or establish that human review, consent,
+provenance, or approval actually occurred.
 
 The service-reuse prerequisite is implemented separately: production routes now
 use `question_service.create_question_session` and
@@ -233,6 +241,10 @@ not execute the production pipeline or admit the synthetic fixture to a live stu
    tests as a regression gate. No live calls are needed for acceptance.
 
 ## Research decisions before a live study
+
+The protocol schema now requires these decisions to be explicit before it reports
+technical readiness. The checked-in synthetic protocol intentionally fails live
+admission, and no repository artifact supplies external human verification.
 
 - Which dataset context facts can a human attest as user-provided, and which
   frozen documents and exact clarification answers may be admitted? Current

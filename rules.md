@@ -40,6 +40,7 @@ coding agents.
 - Keep the question engine bounded. It should ask only from unresolved `InformationGap` items and avoid duplicate question text across a session.
 - Do not claim unverified benchmark results. The repo documentation explicitly says the current dataset and retrieval/evaluation baselines are experimental and not yet validated.
 - Label the fixed benchmark pilot as `benchmark_infrastructure_smoke_test`: its dataset template is not the production context-engineering pipeline, and pilot scores cannot be presented as evidence for the full FYP pipeline.
+- Treat live-study protocol admission as technical configuration only. A valid schema or `ready=true` report never proves reviewer identity, consent, provenance, external approval, or authorization to run providers.
 
 ### Exact evaluation rubric in the repo
 

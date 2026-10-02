@@ -16,7 +16,7 @@ from uuid import UUID, uuid4
 import httpx
 from bs4 import BeautifulSoup
 from docx import Document as WordDocument
-from openpyxl import load_workbook  # type: ignore[import-untyped]
+from openpyxl import load_workbook
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 

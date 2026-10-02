@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -221,7 +222,7 @@ def test_synthetic_fixture_cannot_claim_human_approval() -> None:
     data["review"] = {
         "status": "human_approved",
         "reviewer_id": "invented-reviewer",
-        "reviewed_at": "2026-01-01",
+        "reviewed_at": "2026-01-01T00:00:00Z",
     }
     with pytest.raises(ValidationError, match="Synthetic fixtures cannot claim human review"):
         parsed(data)
@@ -243,6 +244,52 @@ def test_experimental_review_requires_real_fields_and_excludes_synthetic_sources
     data["review"]["reviewed_at"] = "2026-01-01T00:00:00Z"
     with pytest.raises(ValidationError, match="cannot contain synthetic test sources"):
         parsed(data)
+
+
+@pytest.mark.parametrize("value", [0, 0.0, True, "0", float("nan"), float("inf")])
+def test_review_timestamp_rejects_non_iso_scalars(value: object) -> None:
+    data = manifest_data()
+    data["fixture_kind"] = "experimental_candidate"
+    data["project_facts"] = []
+    data["clarification_answers"] = []
+    data["frozen_documents"] = []
+    data["evaluation_only"] = []
+    data["review"] = {
+        "status": "human_approved",
+        "reviewer_id": "unverified-unit-test-reviewer",
+        "reviewed_at": value,
+    }
+    with pytest.raises(ValidationError, match="timezone-aware ISO-8601"):
+        parsed(data)
+
+
+def test_review_timestamp_requires_timezone_and_accepts_trusted_datetime() -> None:
+    data = manifest_data()
+    data["fixture_kind"] = "experimental_candidate"
+    data["project_facts"] = []
+    data["clarification_answers"] = []
+    data["frozen_documents"] = []
+    data["evaluation_only"] = []
+    data["review"] = {
+        "status": "human_approved",
+        "reviewer_id": "unverified-unit-test-reviewer",
+        "reviewed_at": "2026-02-01T12:00:00",
+    }
+    with pytest.raises(ValidationError, match="include a timezone"):
+        parsed(data)
+
+    data["review"]["reviewed_at"] = datetime(2026, 2, 1, 12, tzinfo=UTC)
+    manifest = parsed(data)
+    assert manifest.review.reviewed_at == datetime(2026, 2, 1, 12, tzinfo=UTC)
+
+
+def test_numeric_review_timestamp_cannot_bypass_validation_with_model_copy() -> None:
+    dataset = load_dataset(DATASET_PATH)
+    manifest = load_fixture_manifest(MANIFEST_PATH, dataset)
+    forged_review = manifest.review.model_copy(update={"reviewed_at": 0})
+    forged = manifest.model_copy(update={"review": forged_review})
+    with pytest.raises(ValidationError, match="timezone-aware ISO-8601"):
+        validate_manifest(forged, dataset, MANIFEST_PATH)
 
 
 def test_frozen_document_bytes_must_match_checksum(tmp_path: Path) -> None:

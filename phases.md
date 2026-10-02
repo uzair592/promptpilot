@@ -61,6 +61,16 @@ but no validated benchmark results or final performance claims.
 - JSON and CSV exports preserve task, prompt, context, model parameters, lineage, evaluation, ordering, timestamps, and failures.
 - Status: INFRASTRUCTURE SMOKE TEST READY. No validated full-pipeline benchmark results exist yet.
 
+### Live-study protocol admission
+
+- A separate strict, immutable `v1` protocol freezes fixture selection, comparison and
+  fallback policy, analysis stratum, evaluation, provider/model assignments, exact
+  target parameters, stop rules and budgets.
+- Offline admission reuses dataset-bound fixture validation and live-manifest admission,
+  verifies attestations and hashes, and exports deterministic worst-case call ceilings.
+- Status: TECHNICAL VALIDATOR IMPLEMENTED. No live runner, externally verified human
+  approval, provider authorization or benchmark result exists.
+
 ### Phase G: minimal product shell
 
 - Full auth flow and dashboard/project shell in the frontend.
