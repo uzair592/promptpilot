@@ -1,0 +1,93 @@
+{
+  "schema_version": "v1",
+  "protocol_id": "synthetic-offline-protocol-v1",
+  "study_title": "Synthetic offline protocol validation test",
+  "study_version": "test-v1",
+  "dataset_name": "promptpilot-experimental-v1",
+  "dataset_sha256": "8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d",
+  "selected_fixtures": [
+    {
+      "fixture_id": "synthetic-planning-workshop-v1",
+      "manifest_path": "synthetic_manifest.json",
+      "manifest_sha256": "60d64ddbe65cd18990ac766b3e29bb89b8ef89b410b1e70c7f6fe4656c34a5f3",
+      "attestation": {
+        "attestation_version": "v1",
+        "fixture_id": "synthetic-planning-workshop-v1",
+        "manifest_sha256": "60d64ddbe65cd18990ac766b3e29bb89b8ef89b410b1e70c7f6fe4656c34a5f3",
+        "reviewer_id": "test-only-reviewer",
+        "reviewed_at": "2026-01-01T00:00:00Z",
+        "provenance_consent_evidence_reference": "test-only://synthetic-evidence/not-human-verified",
+        "test_only": true
+      }
+    }
+  ],
+  "repetitions": 2,
+  "question_cap": 2,
+  "comparison_policy": {
+    "baseline_input": "exact_original_task",
+    "execution_order": "alternating_paired",
+    "unit_isolation": "task_repetition",
+    "incomplete_pair_evaluation": "prohibited",
+    "unmatched_gap": "stop",
+    "fallback_admission": "reject"
+  },
+  "analysis_stratum": {
+    "name": "strict_ai_backed",
+    "fallback_containing_runs_admissible": false
+  },
+  "generation_mode": "structured",
+  "evaluation": {
+    "primary": "heuristic",
+    "secondary": null
+  },
+  "baseline_target_parameters": {
+    "temperature": 0,
+    "max_tokens": 300,
+    "top_p": 1,
+    "seed": 7,
+    "stop": [],
+    "presence_penalty": 0,
+    "frequency_penalty": 0
+  },
+  "promptpilot_target_parameters": {
+    "temperature": 0,
+    "max_tokens": 300,
+    "top_p": 1,
+    "seed": 7,
+    "stop": [],
+    "presence_penalty": 0,
+    "frequency_penalty": 0
+  },
+  "providers": {
+    "analysis": {"provider": "offline-test", "model": "analysis-test-model"},
+    "question_generation": {"provider": "offline-test", "model": "question-test-model"},
+    "prompt_generation": {"provider": "offline-test", "model": "prompt-test-model"},
+    "baseline_target": {"provider": "offline-test", "model": "target-test-model"},
+    "promptpilot_target": {"provider": "offline-test", "model": "target-test-model"},
+    "judge": null
+  },
+  "call_budgets": {
+    "by_role": {
+      "analysis": 2,
+      "question_generation": 4,
+      "prompt_generation": 2,
+      "target_execution": 4,
+      "judge": 0
+    },
+    "total": 12
+  },
+  "monetary_budget": null,
+  "stop_rules": {
+    "stop_on_budget_exhaustion": true,
+    "stop_on_manifest_change": true,
+    "stop_on_incomplete_treatment_preparation": true,
+    "stop_on_target_failure": true,
+    "stop_on_judge_failure": true,
+    "maximum_consecutive_provider_failures": 1
+  },
+  "review": {
+    "status": "locked",
+    "reviewer_id": "test-only-protocol-reviewer",
+    "locked_at": "2026-01-01T00:00:00Z"
+  }
+}

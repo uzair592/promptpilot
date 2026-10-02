@@ -101,6 +101,9 @@ The actual evaluator is defined in `schemas.py` and enforced in `evaluation_serv
 - Checked-in SQL migrations exist under `apps/backend/migrations`; local development
   additionally creates the SQLAlchemy schema at startup.
 - The app does not implement autonomous tool execution, sandbox traversal, or a true planning engine.
+- The live-study protocol validator only checks technical completeness and frozen local
+  artifacts. Reviewer, consent, provenance and approval fields remain externally
+  unverified claims, and validation cannot authorize a live run.
 
 ## PLANNED
 

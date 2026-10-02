@@ -108,6 +108,10 @@ executions, and evaluations.
 - The fixed pilot is explicitly a `benchmark_infrastructure_smoke_test` using a
   deterministic dataset template under the existing `promptpilot` execution strategy.
   A production-pipeline adapter is a separate research milestone before FYP claims.
+- The production benchmark now has a separate immutable live-study protocol and offline
+  admission report. It freezes study policies and calculates call ceilings but performs
+  no provider construction/calls; technical readiness never substitutes for external
+  verification of reviewer identity, consent, provenance, or approval.
 
 ## PLANNED
 

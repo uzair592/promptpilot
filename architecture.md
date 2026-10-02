@@ -33,6 +33,7 @@ results exist.
 - `execution_service.py`: executes original or optimized prompts and stores `ModelRun` rows.
 - `evaluation_service.py`: deterministic heuristic evaluation plus optional LLM-judge path for response comparison.
 - `benchmark.py`: validated task dataset, isolated paired execution, repeated-run records, and JSON/CSV export. Its current pilot uses a deterministic dataset template with the existing `promptpilot` execution strategy and is an infrastructure smoke test, not an execution of the production context-engineering pipeline.
+- `production_benchmark_protocol.py`: strict frozen live-study declaration, dataset/manifest/document admission, fixture attestations, deterministic call ceilings, and an offline machine-readable readiness report. It has no provider construction or execution path.
 
 ### Data model highlights
 
