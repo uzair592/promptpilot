@@ -90,15 +90,30 @@ def positive_protocol(tmp_path: Path) -> tuple[LiveStudyProtocol, Path, str]:
     return parsed(data), protocol_path, fixture_id
 
 
-def test_frozen_fixture_protocol_uses_approved_skip_policies() -> None:
+def test_synthetic_fixture_keeps_independent_regression_policies() -> None:
+    """The synthetic fixture is an offline regression artifact, not the production study.
+
+    Its clarification policies deliberately differ from the frozen production
+    protocol (skip) so the two declarations cannot drift into each other.
+    """
+
     policy = parsed().comparison_policy
-    assert policy.unmatched_gap == "skip"
-    assert policy.unanswered_question == "skip"
+    assert policy.unmatched_gap == "stop"
+    assert policy.unanswered_question == "stop"
     assert policy.fallback_admission == "reject"
     assert policy.baseline_input == "exact_original_task"
     assert policy.execution_order == "alternating_paired"
     assert policy.unit_isolation == "task_repetition"
     assert policy.incomplete_pair_evaluation == "prohibited"
+
+
+def test_skip_policies_remain_admissible_for_the_production_declaration() -> None:
+    data = protocol_data()
+    data["comparison_policy"]["unmatched_gap"] = "skip"
+    data["comparison_policy"]["unanswered_question"] = "skip"
+    policy = parsed(data).comparison_policy
+    assert policy.unmatched_gap == "skip"
+    assert policy.unanswered_question == "skip"
 
 
 def production_shape_protocol() -> dict[str, object]:
