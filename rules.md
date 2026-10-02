@@ -41,6 +41,7 @@ coding agents.
 - Do not claim unverified benchmark results. The repo documentation explicitly says the current dataset and retrieval/evaluation baselines are experimental and not yet validated.
 - Label the fixed benchmark pilot as `benchmark_infrastructure_smoke_test`: its dataset template is not the production context-engineering pipeline, and pilot scores cannot be presented as evidence for the full FYP pipeline.
 - Treat live-study protocol admission as technical configuration only. A valid schema or `ready=true` report never proves reviewer identity, consent, provenance, external approval, or authorization to run providers.
+- Reserve every future benchmark provider call through the durable ledger before execution. Reservation must atomically enforce the frozen role and total budgets, bindings, and idempotency key; ledger readiness still does not authorize provider use.
 
 ### Exact evaluation rubric in the repo
 

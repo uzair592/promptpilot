@@ -1,7 +1,19 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    event,
+    inspect,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -411,3 +423,203 @@ class EvaluationItem(Base):
     score: Mapped[int] = mapped_column(Integer, nullable=False)
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     evaluation: Mapped[Evaluation] = relationship(back_populates="items")
+
+
+class BenchmarkExperimentRun(Base):
+    """Durable technical ledger state; never proof of external study approval."""
+
+    __tablename__ = "benchmark_experiment_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('staged', 'running', 'completed', 'failed', 'aborted')",
+            name="ck_benchmark_experiment_runs_status",
+        ),
+        CheckConstraint(
+            "external_human_approval_verified = false",
+            name="ck_benchmark_experiment_runs_human_unverified",
+        ),
+        CheckConstraint(
+            "analysis_call_ceiling >= 0 AND question_generation_call_ceiling >= 0 "
+            "AND prompt_generation_call_ceiling >= 0 AND target_execution_call_ceiling >= 0 "
+            "AND judge_call_ceiling >= 0 AND total_call_ceiling >= 0",
+            name="ck_benchmark_experiment_runs_nonnegative_ceilings",
+        ),
+        CheckConstraint(
+            "reserved_count >= 0 AND succeeded_count >= 0 AND failed_count >= 0 "
+            "AND cancelled_count >= 0 AND analysis_consumed_count >= 0 "
+            "AND question_generation_consumed_count >= 0 "
+            "AND prompt_generation_consumed_count >= 0 "
+            "AND target_execution_consumed_count >= 0 AND judge_consumed_count >= 0",
+            name="ck_benchmark_experiment_runs_nonnegative_counts",
+        ),
+        CheckConstraint(
+            "total_call_ceiling = analysis_call_ceiling "
+            "+ question_generation_call_ceiling + prompt_generation_call_ceiling "
+            "+ target_execution_call_ceiling + judge_call_ceiling",
+            name="ck_benchmark_experiment_runs_ceiling_total",
+        ),
+        CheckConstraint(
+            "analysis_consumed_count <= analysis_call_ceiling "
+            "AND question_generation_consumed_count <= question_generation_call_ceiling "
+            "AND prompt_generation_consumed_count <= prompt_generation_call_ceiling "
+            "AND target_execution_consumed_count <= target_execution_call_ceiling "
+            "AND judge_consumed_count <= judge_call_ceiling",
+            name="ck_benchmark_experiment_runs_role_budgets",
+        ),
+        CheckConstraint(
+            "reserved_count + succeeded_count + failed_count <= total_call_ceiling",
+            name="ck_benchmark_experiment_runs_total_budget",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    owner_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    experiment_scope: Mapped[str] = mapped_column(String(80), nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    protocol_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    protocol_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    dataset_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="staged", index=True)
+    frozen_role_bindings_json: Mapped[str] = mapped_column(Text, nullable=False)
+    analysis_call_ceiling: Mapped[int] = mapped_column(Integer, nullable=False)
+    question_generation_call_ceiling: Mapped[int] = mapped_column(Integer, nullable=False)
+    prompt_generation_call_ceiling: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_execution_call_ceiling: Mapped[int] = mapped_column(Integer, nullable=False)
+    judge_call_ceiling: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_call_ceiling: Mapped[int] = mapped_column(Integer, nullable=False)
+    reserved_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    succeeded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cancelled_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    analysis_consumed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    question_generation_consumed_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    prompt_generation_consumed_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    target_execution_consumed_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    judge_consumed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_sequence: Mapped[int] = mapped_column(
+        Integer, CheckConstraint("next_attempt_sequence >= 0"), nullable=False, default=0
+    )
+    budget_currency: Mapped[str | None] = mapped_column(String(3))
+    external_human_approval_verified: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    abort_reason_code: Mapped[str | None] = mapped_column(String(80))
+    failure_reason_code: Mapped[str | None] = mapped_column(String(80))
+    repository_commit_sha: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    aborted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[list["BenchmarkProviderCallAttempt"]] = relationship(
+        back_populates="experiment_run", cascade="all, delete-orphan"
+    )
+
+
+class BenchmarkProviderCallAttempt(Base):
+    """Credential-free provider-call reservation and terminal metadata."""
+
+    __tablename__ = "benchmark_provider_call_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "experiment_run_id",
+            "idempotency_key",
+            name="uq_benchmark_attempts_run_idempotency",
+        ),
+        UniqueConstraint(
+            "experiment_run_id",
+            "sequence_number",
+            name="uq_benchmark_attempts_run_sequence",
+        ),
+        CheckConstraint(
+            "provider_role IN ('analysis', 'question_generation', 'prompt_generation', "
+            "'target_execution', 'judge')",
+            name="ck_benchmark_attempts_role",
+        ),
+        CheckConstraint(
+            "status IN ('reserved', 'started', 'succeeded', 'failed', 'cancelled')",
+            name="ck_benchmark_attempts_status",
+        ),
+        CheckConstraint("repetition >= 1", name="ck_benchmark_attempts_repetition"),
+        CheckConstraint(
+            "input_tokens IS NULL OR input_tokens >= 0",
+            name="ck_benchmark_attempts_input_tokens",
+        ),
+        CheckConstraint(
+            "output_tokens IS NULL OR output_tokens >= 0",
+            name="ck_benchmark_attempts_output_tokens",
+        ),
+        CheckConstraint(
+            "total_tokens IS NULL OR total_tokens >= 0",
+            name="ck_benchmark_attempts_total_tokens",
+        ),
+        CheckConstraint(
+            "cost_estimate IS NULL OR cost_estimate >= 0",
+            name="ck_benchmark_attempts_cost",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    experiment_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("benchmark_experiment_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    stable_unit_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    fixture_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    task_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    repetition: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider_role: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    target_condition: Mapped[str | None] = mapped_column(String(20))
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    configured_provider: Mapped[str] = mapped_column(String(120), nullable=False)
+    configured_model: Mapped[str] = mapped_column(String(240), nullable=False)
+    generation_parameter_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="reserved")
+    reserved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
+    cost_estimate: Mapped[float | None] = mapped_column(Float)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    safe_error_type: Mapped[str | None] = mapped_column(String(80))
+    safe_error_code: Mapped[str | None] = mapped_column(String(80))
+    fallback_classification: Mapped[str | None] = mapped_column(String(40))
+    observation_outcome: Mapped[str | None] = mapped_column(String(40))
+    response_artifact_sha256: Mapped[str | None] = mapped_column(String(64))
+    experiment_run: Mapped[BenchmarkExperimentRun] = relationship(back_populates="attempts")
+
+
+_IMMUTABLE_BENCHMARK_ATTEMPT_FIELDS = (
+    "experiment_run_id",
+    "stable_unit_id",
+    "fixture_id",
+    "task_id",
+    "repetition",
+    "provider_role",
+    "target_condition",
+    "sequence_number",
+    "idempotency_key",
+    "configured_provider",
+    "configured_model",
+    "generation_parameter_sha256",
+    "request_artifact_sha256",
+)
+
+
+@event.listens_for(BenchmarkProviderCallAttempt, "before_update")
+def _prevent_benchmark_attempt_identity_mutation(
+    _mapper: object, _connection: object, target: BenchmarkProviderCallAttempt
+) -> None:
+    state = inspect(target)
+    if any(state.attrs[field].history.has_changes() for field in _IMMUTABLE_BENCHMARK_ATTEMPT_FIELDS):
+        raise ValueError("Benchmark provider-call attempt identity is immutable")

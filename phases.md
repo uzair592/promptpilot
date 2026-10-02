@@ -71,6 +71,15 @@ but no validated benchmark results or final performance claims.
 - Status: TECHNICAL VALIDATOR IMPLEMENTED. No live runner, externally verified human
   approval, provider authorization or benchmark result exists.
 
+### Durable provider-call ledger
+
+- Experiment runs and provider-call attempts persist protocol/dataset bindings, frozen
+  role assignments, safe artifact hashes, lifecycle outcomes, and budget counters.
+- Atomic conditional reservation and database uniqueness enforce per-role/total ceilings
+  and retry idempotency, including concurrent contention for the final slot.
+- Status: TECHNICAL ACCOUNTING IMPLEMENTED. No provider is constructed or called, and
+  external approval remains explicitly unverified.
+
 ### Phase G: minimal product shell
 
 - Full auth flow and dashboard/project shell in the frontend.

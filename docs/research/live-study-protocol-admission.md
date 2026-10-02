@@ -5,6 +5,10 @@ future live production-pipeline adapter can be considered technically configured
 an offline validator only. It does not construct providers, make network requests, call
 models, create benchmark records, or authorize a live run.
 
+The separate [benchmark provider-call ledger](benchmark-provider-call-ledger.md) can bind
+a durable staged run to a technically ready admission report and atomically reserve its
+declared budgets. It still does not verify external approval or execute provider calls.
+
 ## Offline command
 
 From `apps/backend`:

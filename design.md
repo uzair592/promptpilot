@@ -104,6 +104,9 @@ The actual evaluator is defined in `schemas.py` and enforced in `evaluation_serv
 - The live-study protocol validator only checks technical completeness and frozen local
   artifacts. Reviewer, consent, provenance and approval fields remain externally
   unverified claims, and validation cannot authorize a live run.
+- The durable benchmark ledger enforces admitted bindings and call ceilings but is not a
+  live runner. It stores no raw prompts/responses or credentials, constructs no provider,
+  and cannot supply external approval or spending authorization.
 
 ## PLANNED
 

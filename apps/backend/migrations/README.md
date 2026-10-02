@@ -31,6 +31,14 @@ separate from provider usage metadata:
 psql "$env:DATABASE_URL" -f apps/backend/migrations/012_benchmark_hardening.sql
 ```
 
+The provider-call ledger adds durable experiment runs, immutable call reservations,
+idempotency constraints, status checks, and nonnegative accounting. It stages no live
+runner and stores no provider credentials:
+
+```powershell
+psql "$env:DATABASE_URL" -f apps/backend/migrations/013_benchmark_provider_call_ledger.sql
+```
+
 Projects use archive status instead of deletion. The owner membership is explicit and is created in the same transaction as its project.
 
 Messages use a per-conversation `sequence` for deterministic ordering. Clients may send `Idempotency-Key`; a repeated key in the same conversation returns the original message instead of inserting a duplicate.

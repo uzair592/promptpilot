@@ -112,6 +112,10 @@ executions, and evaluations.
   admission report. It freezes study policies and calculates call ceilings but performs
   no provider construction/calls; technical readiness never substitutes for external
   verification of reviewer identity, consent, provenance, or approval.
+- A durable benchmark ledger now binds staged runs to that admission report and uses an
+  atomic conditional reservation plus unique idempotency keys so retries and concurrent
+  final-slot requests cannot overspend. Its records use hashes and safe classifications,
+  and external approval remains false by design.
 
 ## PLANNED
 
