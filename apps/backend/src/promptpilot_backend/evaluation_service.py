@@ -9,11 +9,11 @@ from collections.abc import Callable
 from typing import Any, Protocol
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .llm_provider import OpenAICompatibleProvider
+from .llm_provider import OpenAICompatibleProvider, ProviderUnavailable
 from .models import Evaluation, EvaluationItem, Message, ModelRun
 from .schemas import (
     EVALUATION_DIMENSIONS,
@@ -38,6 +38,18 @@ TASK_INSTRUCTION_WORDS = {
     "tell",
     "write",
 }
+
+
+class JudgeFailureError(ValueError):
+    """Raised when LLM judge evaluation fails and cannot be completed.
+
+    This is NOT an automatic fallback to heuristic. The caller must decide
+    how to handle the failure (e.g., mark pair as failed, record the error).
+    """
+
+    def __init__(self, safe_error_type: str) -> None:
+        super().__init__("LLM judge evaluation failed; pair evaluation cannot complete")
+        self.safe_error_type = safe_error_type
 
 
 class EvaluationResult(BaseModel):
@@ -470,7 +482,10 @@ class ResponseEvaluationService:
         context: list[dict[str, object] | str],
     ) -> tuple[EvaluationResult, EvaluationResult | None]:
         if method == "llm_judge":
-            return self._judge(task, response_a, response_b, evidence)
+            try:
+                return self._judge(task, response_a, response_b, evidence)
+            except (ValidationError, ProviderUnavailable, ValueError) as exc:
+                raise JudgeFailureError(safe_error_type=type(exc).__name__) from exc
         return (
             heuristic_score(task, response_a, requirements, constraints, context),
             heuristic_score(task, response_b, requirements, constraints, context)
