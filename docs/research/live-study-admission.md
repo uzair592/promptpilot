@@ -104,7 +104,7 @@ prompt generation 2, target execution 4, judge 0, total 12.
 
 The checked-in dataset is `promptpilot-experimental-v1`, SHA-256
 `8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d`, with 8 tasks
-across 7 categories. It is an experimental template, not a human-reviewed live-study
+across 8 categories. It is an experimental template, not a human-reviewed live-study
 dataset. Inclusion/exclusion rules, category definitions, and fixture/ground-truth
 policy are not yet frozen by a human reviewer.
 

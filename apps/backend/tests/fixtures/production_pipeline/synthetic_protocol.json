@@ -29,6 +29,7 @@
     "unit_isolation": "task_repetition",
     "incomplete_pair_evaluation": "prohibited",
     "unmatched_gap": "stop",
+    "unanswered_question": "stop",
     "fallback_admission": "reject"
   },
   "analysis_stratum": {

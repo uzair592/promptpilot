@@ -99,7 +99,8 @@ def synthetic_manifest(tmp_path: Path, *, include_answers: bool = True) -> Path:
 def policy(**updates):
     values = {
         "question_cap": 2,
-        "unmatched_gap": "stop",
+        "unmatched_gap": "skip",
+        "unanswered_question": "skip",
         "fallback": "reject",
         "generation_mode": "structured",
         "evaluation_method": "heuristic",
@@ -357,10 +358,29 @@ def test_missing_answer_remains_partial_without_target_calls(client, monkeypatch
     assert record.status == "partial" and not record.complete_pair
     assert record.reason == "unmatched_gap_no_fixture_answer"
     assert record.artifacts["unmatched_gaps"]
-    assert fake.analysis.calls == 1 and fake.question.calls == 1
+    unanswered = record.artifacts["unanswered_questions"]
+    assert [item["resolution"] for item in unanswered] == ["skip", "skip"]
+    assert all(item["reason"] == "no_matching_fixture_answer" for item in unanswered)
+    assert record.policy["unanswered_question"] == "skip"
+    assert fake.analysis.calls == 1 and fake.question.calls == 2
     assert fake.prompt.calls == 0 and fake.target.calls == []
     exported = json.loads((tmp_path / "results/results.json").read_text(encoding="utf-8"))
     assert exported[0]["status"] == "partial"
+
+
+def test_question_cap_records_explicit_unresolved_gaps(client, monkeypatch, tmp_path):
+    records, fake = run_one(
+        client, monkeypatch, tmp_path, policy_value=policy(question_cap=1)
+    )
+    record = records[0]
+    assert record.status == "partial" and not record.complete_pair
+    assert record.reason == "question_cap_reached"
+    assert record.artifacts["question_count"] == 1
+    assert record.artifacts["unresolved_gaps"]
+    assert all(
+        item["resolution"] == "unanswered" for item in record.artifacts["unresolved_gaps"]
+    )
+    assert fake.target.calls == []
 
 
 def test_rejected_analysis_fallback_and_observer_gap_cannot_complete(client, monkeypatch, tmp_path):
@@ -528,9 +548,11 @@ def test_llm_judge_uses_injected_offline_provider_and_neutral_mapping(
         name = "offline-judge"
         model = "judge-test-model"
         calls = 0
+        evidence = None
 
         def judge_response(self, task, response_a, response_b, evidence=None):
             self.calls += 1
+            self.evidence = evidence
             score = ResponseScore(
                 relevance=60,
                 completeness=60,
@@ -553,8 +575,30 @@ def test_llm_judge_uses_injected_offline_provider_and_neutral_mapping(
     record = records[0]
     assert record.complete_pair and judge.calls == 1
     assert record.provider_observations[-1]["purpose"] == "judge"
+    assert record.artifacts["evaluation"]["method"] == "llm_judge"
+    assert record.artifacts["evaluation"]["rubric_version"] == "v1"
     assignment = record.artifacts["evaluation"]["metadata"]["judge_assignment"]
     assert set(assignment.values()) == {"baseline", "promptpilot"}
+    assert (
+        record.artifacts["baseline_run"]["executed_prompt"] == record.artifacts["original_task"]
+    )
+    assert record.artifacts["baseline_run"]["prompt_version_id"] is None
+    assert record.artifacts["promptpilot_run"]["prompt_version_id"] == record.artifacts[
+        "prompt_version_id"
+    ]
+    judge_payload = json.dumps(judge.evidence).casefold()
+    assert "baseline" not in judge_payload
+    assert "promptpilot" not in judge_payload
+    assert "baseline_executed_prompt" not in judge_payload
+    assert "optimized_prompt" not in judge_payload
+    assert set(judge.evidence) == {
+        "task",
+        "requirements",
+        "constraints",
+        "context",
+        "response_a",
+        "response_b",
+    }
 
 
 def test_exports_redact_known_credentials_and_authorization_headers(client, monkeypatch, tmp_path):

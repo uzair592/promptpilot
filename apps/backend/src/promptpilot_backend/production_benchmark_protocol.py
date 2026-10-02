@@ -143,7 +143,8 @@ class ComparisonPolicy(StrictModel):
     execution_order: Literal["alternating_paired"]
     unit_isolation: Literal["task_repetition"]
     incomplete_pair_evaluation: Literal["prohibited"]
-    unmatched_gap: Literal["stop", "skip_and_exclude"]
+    unmatched_gap: Literal["stop", "skip"]
+    unanswered_question: Literal["stop", "skip"]
     fallback_admission: Literal["reject", "admit_separate_stratum"]
 
 
