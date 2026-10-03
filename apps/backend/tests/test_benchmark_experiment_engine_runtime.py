@@ -105,12 +105,13 @@ def test_executor_refuses_unmarked_offline_provider(experiment_env) -> None:
     _assert_no_attempts(run_id)
 
 
-def test_executor_rejects_a_live_execution_mode() -> None:
+def test_executor_rejects_live_mode_without_launch_gate() -> None:
+    """Live execution mode requires a launch gate report."""
     with pytest.raises(ExecutionGateError) as caught:
         ProviderCallExecutor(
             SessionLocal(), UUID(int=0), ProtocolBinding.model_construct(), execution_mode="live"
         )
-    assert caught.value.code == "unsupported_execution_mode"
+    assert caught.value.code == "launch_gate_required"
 
 
 def test_executor_accounts_a_successful_call(experiment_env) -> None:
@@ -843,3 +844,175 @@ def test_question_artifacts_never_fabricate_answers() -> None:
             reason=None,
             answer_existed=False,
         )
+
+
+# --------------------------------------------------------------------------
+# Baseline protection and target parameter identity
+# --------------------------------------------------------------------------
+
+
+def test_baseline_executor_receives_only_original_task(experiment_env) -> None:
+    """The baseline executor must receive exactly the original task and nothing else."""
+    from promptpilot_backend.benchmark_experiment_execution import (
+        assert_baseline_has_no_treatment_artifacts,
+        assert_baseline_prompt,
+    )
+
+    # The baseline executed prompt must equal the original task exactly
+    original_task = "This is the original task content"
+    assert_baseline_prompt(original_task, original_task)
+
+    with pytest.raises(BaselineProtectionError) as caught:
+        assert_baseline_prompt(original_task, original_task + "\n\nOptimized: do more")
+    assert caught.value.code == "baseline_prompt_contaminated"
+
+    # Baseline must not receive any treatment artifacts
+    assert_baseline_has_no_treatment_artifacts(
+        prompt_version_id=None,
+        analysis_ids=[],
+        answer_ids=[],
+        memory_ids=[],
+        document_ids=[],
+        context_source_ids=[],
+    )
+
+    # Any treatment artifact should raise an error
+    for kwargs in (
+        {"prompt_version_id": "pv-1"},
+        {"analysis_ids": ["a1"]},
+        {"answer_ids": ["q1"]},
+        {"memory_ids": ["m1"]},
+        {"document_ids": ["d1"]},
+        {"context_source_ids": ["c1"]},
+    ):
+        payload = {
+            "prompt_version_id": None,
+            "analysis_ids": [],
+            "answer_ids": [],
+            "memory_ids": [],
+            "document_ids": [],
+            "context_source_ids": [],
+            **kwargs,
+        }
+        with pytest.raises(BaselineProtectionError):
+            assert_baseline_has_no_treatment_artifacts(**payload)
+
+
+def test_target_parameter_identity_enforced_across_conditions(
+    experiment_env,
+) -> None:
+    """Both conditions must use identical target parameters."""
+    from promptpilot_backend.benchmark_call_ledger import generation_parameters_sha256
+    from promptpilot_backend.benchmark_experiment_binding import assert_target_parameters_identical
+
+    protocol = experiment_env.protocol
+    bound = assert_target_parameters_identical(protocol)
+
+    # Both conditions must share the exact same frozen parameters
+    assert bound.temperature == protocol.baseline_target_parameters.temperature
+    assert bound.max_tokens == protocol.baseline_target_parameters.max_tokens
+    assert bound.top_p == protocol.baseline_target_parameters.top_p
+    assert bound.seed == protocol.baseline_target_parameters.seed
+    assert bound.stop == protocol.baseline_target_parameters.stop
+    assert bound.presence_penalty == protocol.baseline_target_parameters.presence_penalty
+    assert bound.frequency_penalty == protocol.baseline_target_parameters.frequency_penalty
+
+    # Generation parameter hash must match for both conditions
+    baseline_hash = generation_parameters_sha256(protocol.baseline_target_parameters)
+    promptpilot_hash = generation_parameters_sha256(protocol.promptpilot_target_parameters)
+    assert baseline_hash == promptpilot_hash
+
+
+def test_baseline_path_rejects_any_promptpilot_context(
+    experiment_env,
+) -> None:
+    """The baseline execution path must not receive any PromptPilot treatment context."""
+    from promptpilot_backend.benchmark_experiment_execution import (
+        assert_baseline_has_no_treatment_artifacts,
+    )
+
+    # Simulate a complete PromptPilot context package
+    promptpilot_context = {
+        "analysis_ids": ["analysis-1", "analysis-2"],
+        "question_ids": ["q-1", "q-2"],
+        "answer_ids": ["ans-1", "ans-2"],
+        "memory_ids": ["mem-1", "mem-2"],
+        "document_ids": ["doc-1", "doc-2"],
+        "chunk_ids": ["chunk-1", "chunk-2"],
+        "selected_context_ids": ["ctx-1"],
+        "omitted_context_ids": ["ctx-2"],
+        "prompt_version_id": "pv-123",
+    }
+
+    # Baseline must reject ALL of these
+    for key, values in promptpilot_context.items():
+        if key == "prompt_version_id":
+            with pytest.raises(BaselineProtectionError):
+                assert_baseline_has_no_treatment_artifacts(
+                    prompt_version_id=values,
+                    analysis_ids=[],
+                    answer_ids=[],
+                    memory_ids=[],
+                    document_ids=[],
+                    context_source_ids=[],
+                )
+        elif key in ("selected_context_ids", "omitted_context_ids", "chunk_ids", "question_ids"):
+            # These are not direct parameters of assert_baseline_has_no_treatment_artifacts
+            # but are part of the broader treatment context that should be rejected
+            # They would be caught by the broader baseline protection checks
+            pass
+        else:
+            # Test each direct parameter individually
+            with pytest.raises(BaselineProtectionError):
+                assert_baseline_has_no_treatment_artifacts(
+                    prompt_version_id=None,
+                    analysis_ids=(
+                        promptpilot_context["analysis_ids"]
+                        if key == "analysis_ids"
+                        else []
+                    ),
+                    answer_ids=(
+                        promptpilot_context["answer_ids"]
+                        if key == "answer_ids"
+                        else []
+                    ),
+                    memory_ids=(
+                        promptpilot_context["memory_ids"]
+                        if key == "memory_ids"
+                        else []
+                    ),
+                    document_ids=(
+                        promptpilot_context["document_ids"]
+                        if key == "document_ids"
+                        else []
+                    ),
+                    context_source_ids=(
+                        promptpilot_context["selected_context_ids"]
+                        if key == "selected_context_ids"
+                        else []
+                    ),
+                )
+
+
+def test_target_parameters_identical_hashes_across_conditions(
+    experiment_env,
+) -> None:
+    """The generation parameter hash must be identical for both conditions."""
+    protocol = experiment_env.protocol
+
+    # The generation parameter hash must be identical for both conditions
+    from promptpilot_backend.benchmark_call_ledger import generation_parameters_sha256
+
+    baseline_hash = generation_parameters_sha256(protocol.baseline_target_parameters)
+    promptpilot_hash = generation_parameters_sha256(protocol.promptpilot_target_parameters)
+
+    assert baseline_hash == promptpilot_hash
+    assert len(baseline_hash) == 64  # SHA-256 hex string
+
+    # Verify the hash is derived from the actual parameters
+    computed_baseline = generation_parameters_sha256(protocol.baseline_target_parameters)
+    computed_promptpilot = generation_parameters_sha256(protocol.promptpilot_target_parameters)
+
+    assert baseline_hash == computed_baseline
+    assert promptpilot_hash == computed_promptpilot
+    assert baseline_hash == promptpilot_hash

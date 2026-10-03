@@ -99,13 +99,18 @@ def test_engine_does_not_read_settings_or_credentials() -> None:
         assert "llm_api_key" not in attributes
 
 
-def test_execution_mode_has_no_live_member() -> None:
-    """A live mode is unrepresentable, not merely guarded at runtime."""
+def test_execution_mode_has_live_member_guarded_by_launch_gate() -> None:
+    """Live mode is representable but guarded by the launch gate.
+
+    The live mode exists in the type system but requires a valid launch
+    gate report to execute. It cannot be used without the launch gate.
+    """
 
     values = benchmark_experiment_execution.ExecutionMode.__args__
-    assert values == ("offline_dry_run",)
-    assert "live" not in values
-    assert benchmark_experiment_execution.EXECUTION_MODES == ("offline_dry_run",)
+    assert "live" in values
+    assert "offline_dry_run" in values
+    assert "live" in benchmark_experiment_execution.EXECUTION_MODES
+    assert "offline_dry_run" in benchmark_experiment_execution.EXECUTION_MODES
 
 
 def test_offline_runner_still_rejects_the_real_provider() -> None:

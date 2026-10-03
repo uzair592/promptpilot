@@ -1,20 +1,20 @@
 """Provider adapter boundary separating offline and live provider implementations.
 
 This module defines the interface that all provider adapters must implement,
-and provides the offline fixture provider implementation. The live provider
-adapter is a factory boundary that remains unimplemented in this milestone.
+and provides both offline fixture and live provider implementations. The live
+provider adapter wraps the existing LLMProvider abstraction (OpenAICompatibleProvider).
 
 The adapter pattern ensures that the experiment engine never directly
-constructs or calls a real provider. The live runner milestone will provide
-the concrete live implementation behind an explicit launch gate.
+constructs or calls a real provider without going through the adapter layer.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+# Provider role types are defined in benchmark_call_ledger
 
 # Provider role types are defined in benchmark_call_ledger
 ProviderRoleLiteral = Literal[
@@ -89,97 +89,7 @@ class LiveProviderConfig(BaseModel):
     extra_body: dict[str, Any] = {}
 
 
-class ProviderAdapter(ABC):
-    """Abstract base class for provider adapters.
-
-    All provider adapters must implement this interface. The experiment
-    engine only interacts with this interface, never with concrete
-    implementations directly.
-    """
-
-    @property
-    @abstractmethod
-    def role(self) -> str:
-        """The provider role this adapter serves."""
-
-    @property
-    @abstractmethod
-    def provider_name(self) -> str:
-        """The provider identifier (e.g., 'openrouter', 'anthropic')."""
-
-    @property
-    @abstractmethod
-    def model_name(self) -> str:
-        """The model identifier (e.g., 'gpt-4', 'claude-3-opus')."""
-
-    @property
-    @abstractmethod
-    def is_offline(self) -> bool:
-        """Whether this adapter is an offline fixture (never makes network calls)."""
-
-    @abstractmethod
-    def generate(
-        self,
-        prompt: str,
-        parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
-        """Generate a response from the provider.
-
-        Args:
-            prompt: The prompt to send to the provider.
-            parameters: Generation parameters (temperature, max_tokens, etc.).
-
-        Returns:
-            A standardized provider response.
-
-        Raises:
-            ProviderAdapterError: If the provider call fails.
-        """
-
-    @abstractmethod
-    def generate_question(
-        self,
-        prompt: str,
-        parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
-        """Generate a clarification question from the provider."""
-
-    @abstractmethod
-    def generate_prompt(
-        self,
-        prompt: str,
-        parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
-        """Generate an optimized prompt from the provider."""
-
-    @abstractmethod
-    def judge_response(
-        self,
-        task: str,
-        response_a: str,
-        response_b: str,
-        evidence: dict[str, Any],
-    ) -> ProviderResponse:
-        """Judge two responses using the provider as LLM judge."""
-
-    @abstractmethod
-    def analyze(
-        self,
-        prompt: str,
-        parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
-        """Analyze the task using the provider."""
-
-    def health_check(self) -> bool:
-        """Check if the provider is available."""
-        return True
-
-    def estimate_cost(self, prompt: str, parameters: dict[str, Any] | None = None) -> float | None:
-        """Estimate the cost of a call. Returns None if estimation is not supported."""
-        return None
-
-
-class OfflineProviderAdapter(ProviderAdapter):
+class OfflineProviderAdapter:
     """Offline fixture provider adapter for testing and dry runs.
 
     This adapter never makes network calls. It returns deterministic
@@ -215,23 +125,23 @@ class OfflineProviderAdapter(ProviderAdapter):
     def is_offline(self) -> bool:
         return True
 
-    def _make_response(self, content: str, base_key: str) -> ProviderResponse:
+    def _make_response(self, content: str, base_key: str) -> dict[str, Any]:
         self._call_count += 1
-        return ProviderResponse(
-            content=content,
-            input_tokens=len(content) // 4,
-            output_tokens=len(content) // 4,
-            total_tokens=len(content) // 2,
-            cost_estimate=0.0,
-            currency="USD",
-            response_metadata={"call_number": self._call_count},
-        )
+        return {
+            "content": content,
+            "input_tokens": len(content) // 4,
+            "output_tokens": len(content) // 4,
+            "total_tokens": len(content) // 2,
+            "cost_estimate": 0.0,
+            "currency": "USD",
+            "response_metadata": {"call_number": self._call_count},
+        }
 
     def generate(
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
+    ) -> dict[str, Any]:
         key = f"generate:{prompt[:50]}"
         prefix = f"[offline:{self._role}] generated response for: "
         content = self._responses.get(key, f"{prefix}{prompt[:50]}")
@@ -241,7 +151,7 @@ class OfflineProviderAdapter(ProviderAdapter):
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
+    ) -> dict[str, Any]:
         key = f"question:{prompt[:50]}"
         prefix = f"[offline:{self._role}] generated question for: "
         content = self._responses.get(key, f"{prefix}{prompt[:50]}")
@@ -251,7 +161,7 @@ class OfflineProviderAdapter(ProviderAdapter):
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
+    ) -> dict[str, Any]:
         key = f"prompt:{prompt[:50]}"
         prefix = f"[offline:{self._role}] generated prompt for: "
         content = self._responses.get(key, f"{prefix}{prompt[:50]}")
@@ -263,7 +173,7 @@ class OfflineProviderAdapter(ProviderAdapter):
         response_a: str,
         response_b: str,
         evidence: dict[str, Any],
-    ) -> ProviderResponse:
+    ) -> dict[str, Any]:
         key = f"judge:{task[:50]}"
         content = self._responses.get(key, '{"winner": "A", "scores": {"a": 80, "b": 70}}')
         return self._make_response(content, "judge")
@@ -272,43 +182,42 @@ class OfflineProviderAdapter(ProviderAdapter):
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
+    ) -> dict[str, Any]:
         key = f"analyze:{prompt[:50]}"
         content = self._responses.get(key, f"[offline:analysis] analysis for: {prompt[:50]}")
         return self._make_response(content, "analyze")
 
 
-class LiveProviderAdapter(ProviderAdapter):
-    """Live provider adapter - NOT IMPLEMENTED IN THIS MILESTONE.
+class LiveProviderAdapter:
+    """Live provider adapter that wraps the repository's LLMProvider.
 
-    This class exists as a factory boundary for the future live-runner
-    milestone. It is intentionally not instantiable in this milestone.
-
-    The live adapter will be implemented in the live-runner milestone
-    behind an explicit launch gate. It will wrap a real provider client
-    (e.g., OpenRouter, Anthropic, OpenAI) and implement the same interface.
+    This adapter wraps the existing LLMProvider abstraction (OpenAICompatibleProvider)
+    and translates between the provider adapter interface and the LLMProvider interface.
     """
 
-    def __init__(self, config: LiveProviderConfig) -> None:
-        # This is deliberately not implemented in this milestone.
-        # The live adapter will be implemented in the live-runner milestone.
-        raise ProviderAdapterError(
-            "live_adapter_not_implemented",
-            "LiveProviderAdapter is not implemented in this milestone. "
-            "Use OfflineProviderAdapter for offline dry runs.",
-        )
+    def __init__(
+        self,
+        llm_provider: Any,
+        role: str,
+        provider_name: str,
+        model_name: str,
+    ) -> None:
+        self._llm_provider = llm_provider
+        self._role = role
+        self._provider_name = provider_name
+        self._model_name = model_name
 
     @property
     def role(self) -> str:
-        raise NotImplementedError("Live adapter not implemented")
+        return self._role
 
     @property
     def provider_name(self) -> str:
-        raise NotImplementedError("Live adapter not implemented")
+        return self._provider_name
 
     @property
     def model_name(self) -> str:
-        raise NotImplementedError("Live adapter not implemented")
+        return self._model_name
 
     @property
     def is_offline(self) -> bool:
@@ -318,22 +227,68 @@ class LiveProviderAdapter(ProviderAdapter):
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
-        raise NotImplementedError("Live adapter not implemented")
+    ) -> dict[str, Any]:
+        """Generate a response from the target model."""
+        payload = {
+            "prompt": prompt,
+            "parameters": parameters or {},
+        }
+        result = self._llm_provider.generate_response(payload)
+        return {
+            "content": result.get("response_text", ""),
+            "input_tokens": result.get("usage", {}).get("prompt_tokens"),
+            "output_tokens": result.get("usage", {}).get("completion_tokens"),
+            "total_tokens": result.get("usage", {}).get("total_tokens"),
+            "cost_estimate": None,
+            "currency": "USD",
+            "response_metadata": {"finish_reason": result.get("finish_reason")},
+        }
 
     def generate_question(
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
-        raise NotImplementedError("Live adapter not implemented")
+    ) -> dict[str, Any]:
+        """Generate a clarification question."""
+        result = self._llm_provider.generate_question(
+            {"task": prompt, "parameters": parameters or {}}
+        )
+        if hasattr(result, "model_dump"):
+            content = result.model_dump_json()
+        else:
+            content = str(result)
+        return {
+            "content": content,
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "cost_estimate": None,
+            "currency": "USD",
+            "response_metadata": {},
+        }
 
     def generate_prompt(
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
-        raise NotImplementedError("Live adapter not implemented")
+    ) -> dict[str, Any]:
+        """Generate an optimized prompt."""
+        result = self._llm_provider.generate_prompt(
+            {"task": prompt, "parameters": parameters or {}}
+        )
+        if hasattr(result, "model_dump"):
+            content = result.model_dump_json()
+        else:
+            content = str(result)
+        return {
+            "content": content,
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "cost_estimate": None,
+            "currency": "USD",
+            "response_metadata": {},
+        }
 
     def judge_response(
         self,
@@ -341,15 +296,49 @@ class LiveProviderAdapter(ProviderAdapter):
         response_a: str,
         response_b: str,
         evidence: dict[str, Any],
-    ) -> ProviderResponse:
-        raise NotImplementedError("Live adapter not implemented")
+    ) -> dict[str, Any]:
+        """Judge two responses using the provider as LLM judge."""
+        result = self._llm_provider.judge_response(task, response_a, response_b, evidence)
+        if hasattr(result, "model_dump"):
+            content = result.model_dump_json()
+        else:
+            content = str(result)
+        return {
+            "content": content,
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "cost_estimate": None,
+            "currency": "USD",
+            "response_metadata": {},
+        }
 
     def analyze(
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
-    ) -> ProviderResponse:
-        raise NotImplementedError("Live adapter not implemented")
+    ) -> dict[str, Any]:
+        """Analyze the task using the provider."""
+        result = self._llm_provider.analyze(prompt)
+        if hasattr(result, "model_dump"):
+            content = result.model_dump_json()
+        else:
+            content = str(result)
+        return {
+            "content": content,
+            "input_tokens": None,
+            "output_tokens": None,
+            "total_tokens": None,
+            "cost_estimate": None,
+            "currency": "USD",
+            "response_metadata": {},
+        }
+
+    def health_check(self) -> bool:
+        return True
+
+    def estimate_cost(self, prompt: str, parameters: dict[str, Any] | None = None) -> float | None:
+        return None
 
 
 class ProviderAdapterFactory:
@@ -357,14 +346,14 @@ class ProviderAdapterFactory:
 
     This factory enforces the execution mode boundary: offline mode
     can only create offline adapters, live mode requires explicit
-    launch authorization and is not available in this milestone.
+    launch authorization and creates live adapters.
     """
 
     def __init__(self, execution_mode: Literal["offline_dry_run", "live"]) -> None:
         if execution_mode not in ("offline_dry_run", "live"):
             raise ValueError(f"Invalid execution mode: {execution_mode}")
         self._mode = execution_mode
-        self._offline_adapters: dict[str, ProviderAdapter] = {}
+        self._offline_adapters: dict[str, Any] = {}
 
     @property
     def mode(self) -> str:
@@ -378,11 +367,11 @@ class ProviderAdapterFactory:
         *,
         responses: dict[str, str] | None = None,
         config: Any | None = None,
-    ) -> ProviderAdapter:
+    ) -> Any:
         """Create a provider adapter for the given role.
 
         In offline mode, only offline adapters are created.
-        In live mode, live adapters would be created (not implemented).
+        In live mode, live adapters are created using the real LLMProvider.
         """
         if self._mode == "offline_dry_run":
             adapter = OfflineProviderAdapter(role, provider, model)
@@ -393,14 +382,18 @@ class ProviderAdapterFactory:
         if self._mode == "live":
             # Live mode requires explicit launch authorization
             # which is verified by the launch gate before factory creation
-            raise NotImplementedError(
-                "Live adapter creation requires launch authorization. "
-                "Not implemented in this milestone."
+            from .llm_provider import OpenAICompatibleProvider
+            llm_provider = OpenAICompatibleProvider()
+            return LiveProviderAdapter(
+                llm_provider=llm_provider,
+                role=provider,
+                provider_name=provider,
+                model_name=model,
             )
 
         raise ValueError(f"Unknown execution mode: {self._mode}")
 
-    def get_offline_adapter(self, role: str, provider: str, model: str) -> ProviderAdapter | None:
+    def get_offline_adapter(self, role: str, provider: str, model: str) -> Any | None:
         """Get an existing offline adapter."""
         key = f"{role}:{provider}:{model}"
         return self._offline_adapters.get(key)
@@ -408,9 +401,9 @@ class ProviderAdapterFactory:
     def create_all_offline_adapters(
         self,
         role_bindings: dict[str, Any],
-    ) -> dict[str, ProviderAdapter]:
+    ) -> dict[str, Any]:
         """Create offline adapters for all roles in the binding."""
-        adapters: dict[str, ProviderAdapter] = {}
+        adapters: dict[str, Any] = {}
         for role, binding in role_bindings.items():
             adapters[role] = OfflineProviderAdapter(
                 role=role,
@@ -418,3 +411,45 @@ class ProviderAdapterFactory:
                 model_name=binding.model,
             )
         return adapters
+
+
+# Keep the old abstract base class for type checking compatibility
+class ProviderAdapter:
+    """Abstract base class for provider adapters (kept for type compatibility)."""
+
+    @property
+    def role(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def provider_name(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def model_name(self) -> str:
+        raise NotImplementedError
+
+    @property
+    def is_offline(self) -> bool:
+        raise NotImplementedError
+
+    def generate(self, prompt: str, parameters: dict[str, Any] | None = None) -> Any:
+        raise NotImplementedError
+
+    def generate_question(self, prompt: str, parameters: dict[str, Any] | None = None) -> Any:
+        raise NotImplementedError
+
+    def generate_prompt(self, prompt: str, parameters: dict[str, Any] | None = None) -> Any:
+        raise NotImplementedError
+
+    def judge_response(
+        self,
+        task: str,
+        response_a: str,
+        response_b: str,
+        evidence: dict[str, Any],
+    ) -> Any:
+        raise NotImplementedError
+
+    def analyze(self, prompt: str, parameters: dict[str, Any] | None = None) -> Any:
+        raise NotImplementedError

@@ -6,7 +6,6 @@ from promptpilot_backend.benchmark_provider_adapter import (
     AdapterConfigurationError,
     LiveProviderAdapter,
     OfflineProviderAdapter,
-    ProviderAdapterError,
     ProviderAdapterFactory,
     ProviderNotAvailableError,
 )
@@ -22,31 +21,47 @@ def test_offline_provider_adapter_is_offline():
 def test_offline_provider_adapter_generates_responses():
     adapter = OfflineProviderAdapter("analysis", "offline-test", "model-test")
     response = adapter.generate("test prompt")
-    assert response.content is not None
-    assert response.cost_estimate == 0.0
-    assert response.currency == "USD"
+    assert response["content"] is not None
+    assert response["cost_estimate"] == 0.0
+    assert response["currency"] == "USD"
 
 
 def test_offline_provider_adapter_custom_responses():
     custom = {"generate:test prompt": "custom response"}
     adapter = OfflineProviderAdapter("analysis", "offline-test", "model-test", custom)
     response = adapter.generate("test prompt")
-    assert response.content == "custom response"
+    assert response["content"] == "custom response"
 
 
 def test_offline_provider_adapter_all_methods():
     adapter = OfflineProviderAdapter("analysis", "offline-test", "model-test")
-    assert adapter.generate("test").content is not None
-    assert adapter.generate_question("test").content is not None
-    assert adapter.generate_prompt("test").content is not None
-    assert adapter.judge_response("task", "a", "b", {}).content is not None
-    assert adapter.analyze("test").content is not None
+    assert adapter.generate("test")["content"] is not None
+    assert adapter.generate_question("test")["content"] is not None
+    assert adapter.generate_prompt("test")["content"] is not None
+    assert adapter.judge_response("task", "a", "b", {})["content"] is not None
+    assert adapter.analyze("test")["content"] is not None
 
 
-def test_live_provider_adapter_raises_not_implemented():
-    with pytest.raises(ProviderAdapterError) as caught:
-        LiveProviderAdapter(None)
-    assert caught.value.code == "live_adapter_not_implemented"
+def test_live_provider_adapter_is_implemented():
+    """LiveProviderAdapter is now implemented and wraps LLMProvider."""
+    from promptpilot_backend.llm_provider import OpenAICompatibleProvider
+
+    # LiveProviderAdapter now wraps an LLMProvider
+    llm_provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
+    llm_provider.base_url = "https://example.invalid"
+    llm_provider.model = "test-model"
+    llm_provider.api_key = ""
+
+    adapter = LiveProviderAdapter(
+        llm_provider=object(),  # mock
+        role="target_execution",
+        provider_name="openrouter",
+        model_name="gpt-4",
+    )
+    assert adapter.is_offline is False
+    assert adapter.provider_name == "openrouter"
+    assert adapter.model_name == "gpt-4"
+    assert adapter.role == "target_execution"
 
 
 def test_provider_adapter_factory_offline_mode():
@@ -56,10 +71,13 @@ def test_provider_adapter_factory_offline_mode():
     assert adapter.is_offline is True
 
 
-def test_provider_adapter_factory_live_mode_raises():
+def test_provider_adapter_factory_live_mode_creates_live_adapter():
     factory = ProviderAdapterFactory("live")
-    with pytest.raises(NotImplementedError):
-        factory.create_adapter("analysis", "openrouter", "gpt-4")
+    adapter = factory.create_adapter("analysis", "openrouter", "gpt-4")
+    # In live mode, factory creates a LiveProviderAdapter
+    assert not adapter.is_offline
+    assert adapter.provider_name == "openrouter"
+    assert adapter.model_name == "gpt-4"
 
 
 def test_provider_adapter_factory_invalid_mode():

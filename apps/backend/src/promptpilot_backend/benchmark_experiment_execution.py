@@ -13,11 +13,12 @@ attempt has been transitioned to ``started``. Budget cannot be exceeded and no
 call can disappear from the ledger, because the role counter is consumed at
 reservation time and the outcome is always settled explicitly.
 
-This milestone exposes exactly one execution mode, ``offline_dry_run``, which
-admits only providers explicitly marked ``offline_fixture = True``. There is no
-``live`` mode member, so live execution is unrepresentable rather than merely
-guarded. The real provider adapter stays an unimplemented factory boundary in
-the future live-runner milestone.
+This milestone exposes two execution modes:
+- ``offline_dry_run``: Admits only providers explicitly marked ``offline_fixture = True``.
+- ``live``: Requires ALL launch gate conditions to pass (protocol locked, fixtures
+  live-eligible, launch authorization supplied, provider/spending authorized, etc.).
+  The live mode is unrepresentable without a valid launch gate - it is
+  fail-closed by design.
 """
 
 from __future__ import annotations
@@ -37,13 +38,16 @@ from .benchmark_call_ledger import (
     TargetCondition,
     canonical_artifact_sha256,
 )
-from .benchmark_experiment_binding import ProtocolBinding
+from .benchmark_experiment_binding import (
+    ProtocolBinding,
+    assert_fixture_current,
+)
+from .benchmark_fixtures import FixtureManifest
 from .llm_provider import OpenAICompatibleProvider
 
-# Offline-only. A "live" member is intentionally absent so that no caller can
-# request live execution from this engine.
-ExecutionMode = Literal["offline_dry_run"]
-EXECUTION_MODES: tuple[ExecutionMode, ...] = ("offline_dry_run",)
+# Execution modes. "live" is only usable when the launch gate passes.
+ExecutionMode = Literal["offline_dry_run", "live"]
+EXECUTION_MODES: tuple[ExecutionMode, ...] = ("offline_dry_run", "live")
 
 
 class ExecutionGateError(ValueError):
@@ -56,13 +60,27 @@ class PartialExperimentUnit(RuntimeError):
     """A unit that cannot continue but is retained as evidence, not deleted."""
 
 
-def require_offline_provider(provider: Any, role: str) -> None:
-    """Reject anything that is not an explicitly offline fixture provider."""
+def require_offline_provider(
+    provider: Any,
+    role: str,
+    execution_mode: Literal["offline_dry_run", "live"] = "offline_dry_run",
+) -> None:
+    """Reject anything that is not an explicitly offline fixture provider in offline mode.
+
+    In live mode, real providers are allowed (they must pass the launch gate).
+    """
+
+    if execution_mode == "live":
+        # In live mode, real providers are allowed (launch gate already verified)
+        return
 
     if isinstance(provider, OpenAICompatibleProvider):
         raise ExecutionGateError(
             "real_provider_rejected",
-            f"Real OpenAI-compatible providers cannot execute in offline dry-run mode ({role})",
+            (
+                "Real OpenAI-compatible providers cannot execute "
+                f"in offline dry-run mode ({role})"
+            ),
         )
     if getattr(provider, "offline_fixture", None) is not True:
         raise ExecutionGateError(
@@ -71,9 +89,13 @@ def require_offline_provider(provider: Any, role: str) -> None:
         )
 
 
-def require_offline_providers(providers: dict[str, Any], role: str) -> None:
+def require_offline_providers(
+    providers: dict[str, Any],
+    role: str,
+    execution_mode: Literal["offline_dry_run", "live"] = "offline_dry_run",
+) -> None:
     for name, provider in providers.items():
-        require_offline_provider(provider, f"{role}:{name}")
+        require_offline_provider(provider, f"{role}:{name}", execution_mode)
 
 
 @dataclass(frozen=True)
@@ -99,16 +121,29 @@ class ProviderCallExecutor:
         binding: ProtocolBinding,
         *,
         execution_mode: ExecutionMode = "offline_dry_run",
+        launch_gate_report: Any | None = None,
     ) -> None:
         if execution_mode not in EXECUTION_MODES:
             raise ExecutionGateError(
                 "unsupported_execution_mode",
-                "Only offline dry-run execution is implemented in this milestone",
+                f"Execution mode {execution_mode} is not supported",
             )
+        if execution_mode == "live":
+            if launch_gate_report is None:
+                raise ExecutionGateError(
+                    "launch_gate_required",
+                    "Live execution mode requires a launch gate report",
+                )
+            if not launch_gate_report.ready:
+                raise ExecutionGateError(
+                    "launch_gate_not_passed",
+                    f"Launch gate not passed: {[b.code for b in launch_gate_report.blockers]}",
+                )
         self._db = db
         self._run_id = run_id
         self._binding = ProtocolBinding.model_validate(binding.model_dump(mode="python"))
         self._mode = execution_mode
+        self._launch_gate_report = launch_gate_report
 
     @property
     def binding(self) -> ProtocolBinding:
@@ -132,7 +167,7 @@ class ProviderCallExecutor:
     ) -> ReservedCall:
         """Run one provider-backed stage through the full ledger lifecycle."""
 
-        require_offline_provider(provider, role)
+        require_offline_provider(provider, role, self._mode)
         request_sha256 = canonical_artifact_sha256(request_payload)
         parameter_sha256 = (
             self._binding.target_parameters.generation_parameter_sha256
@@ -270,6 +305,50 @@ def assert_baseline_prompt(original_task: str, executed_prompt: str) -> None:
         raise BaselineProtectionError(
             "baseline_prompt_contaminated",
             "Baseline executed something other than the exact original task",
+        )
+
+
+def verify_fixture_before_target_execution(
+    binding: ProtocolBinding,
+    fixture_id: str,
+    manifest: FixtureManifest,
+    dataset: Any,
+    manifest_path: Any,
+) -> None:
+    """Re-verify fixture against its frozen binding immediately before target execution.
+
+    This enforces Requirement #4: fixture re-verification immediately before
+    each target condition executes. The fixture must match its frozen binding
+    exactly, including all document hashes, clarification answer hashes, and
+    review status. Any drift causes an immediate stop.
+
+    Args:
+        binding: The frozen protocol binding containing the fixture bindings.
+        fixture_id: The ID of the fixture to verify.
+        manifest: The current fixture manifest to verify.
+        dataset: The benchmark dataset for identity verification.
+        manifest_path: Path to the manifest file.
+
+    Raises:
+        ExecutionGateError: If the fixture has drifted or is not live-eligible.
+    """
+
+    # This will raise BindingError if the fixture has drifted
+    # which we convert to ExecutionGateError for consistent error handling
+    from .benchmark_experiment_binding import BindingError
+    try:
+        assert_fixture_current(binding, fixture_id, manifest, dataset, manifest_path)
+    except BindingError as e:
+        raise ExecutionGateError(e.code, e.args[0] if e.args else str(e)) from e
+
+    # Additional check: fixture must be live-eligible
+    frozen = next(
+        (f for f in binding.fixture_bindings if f.fixture_id == fixture_id), None
+    )
+    if frozen is None or not frozen.live_eligible:
+        raise ExecutionGateError(
+            "fixture_not_live_eligible",
+            f"Fixture {fixture_id} is not live-eligible for target execution",
         )
 
 
