@@ -136,9 +136,16 @@ class ExperimentUnit(StrictResultModel):
         return self.disposition == "complete_pair"
 
 
-class HumanReviewScore(StrictResultModel):
-    """A single blinded reviewer score. Never fabricated by the application."""
+class HumanReviewRecord(StrictResultModel):
+    """One blinded reviewer's score for one dimension of one preselected pair.
 
+    This is the *only* structure that may carry a human score. It exists
+    separately from :class:`HumanReviewSampleSlot` so the pre-review artifact
+    is structurally incapable of holding scores. The application never creates
+    a record; a record only appears once a real human has reviewed the pair.
+    """
+
+    pair_id: str
     reviewer_id: str
     dimension: Literal[
         "relevance",
@@ -153,7 +160,14 @@ class HumanReviewScore(StrictResultModel):
 
 
 class HumanReviewSampleSlot(StrictResultModel):
-    """One preselected pair awaiting blinded human review. Carries no scores."""
+    """One preselected pair awaiting blinded human review.
+
+    This pre-review artifact is deliberately score-free. It carries only pair
+    identity, the neutral A/B responses shown to reviewers, the rubric version,
+    and pending/adjudication state. It has no reviewer list, no score field, and
+    no condition or model identity. Actual scores live exclusively in
+    :class:`HumanReviewRecord`.
+    """
 
     pair_id: str
     task_id: str
@@ -163,26 +177,45 @@ class HumanReviewSampleSlot(StrictResultModel):
     response_b: str
     neutral_label_mapping_stored_separately: Literal[True]
     rubric_version: str = RUBRIC_VERSION
-    reviewers: tuple[HumanReviewScore, ...] = ()
-    adjudication_status: Literal["pending", "adjudicated"] = "pending"
+    review_status: Literal["pending", "reviewed"] = "pending"
+    adjudication_status: Literal["not_required", "pending", "adjudicated"] = (
+        "not_required"
+    )
 
     @property
-    def score_count(self) -> int:
-        return len(self.reviewers)
+    def awaiting_review(self) -> bool:
+        return self.review_status == "pending"
 
 
 class HumanReviewPlan(StrictResultModel):
-    """The approved review plan. Sample selection and scores stay empty."""
+    """The approved review plan.
+
+    ``slots`` holds the blinded pre-review samples, which are score-free.
+    ``records`` holds actual human review data and is empty until a real human
+    reviews a pair. The application never populates it.
+    """
 
     pair_count: int = Field(ge=0)
     reviewer_count: int = Field(ge=0)
     disagreement_threshold_points: int = Field(ge=0)
     adjudication_required_above_threshold: Literal[True]
     slots: tuple[HumanReviewSampleSlot, ...] = ()
+    records: tuple[HumanReviewRecord, ...] = ()
 
     @property
     def populated(self) -> bool:
         return bool(self.slots)
+
+    @property
+    def review_record_count(self) -> int:
+        return len(self.records)
+
+    def disagreements_above_threshold(self) -> tuple[HumanReviewRecord, ...]:
+        """Records flagged for adjudication, per the frozen 20-point policy."""
+
+        return tuple(
+            record for record in self.records if record.flagged_disagreement
+        )
 
 
 class ExperimentExport(StrictResultModel):
@@ -202,6 +235,58 @@ class ExperimentExport(StrictResultModel):
 
     def content_sha256(self) -> str:
         return canonical_artifact_sha256(self.model_dump(mode="json"))
+
+
+class ExportLock(StrictResultModel):
+    """An immutable lock record binding one export file to its content hash.
+
+    The lock is derived from the exact serialized export content. It is a
+    *separate* artifact and is never embedded in the export, so hashing the
+    export cannot be perturbed by the lock's own bytes.
+    """
+
+    lock_version: Literal["v1"] = "v1"
+    export_schema_version: str
+    experiment_scope: Literal["production_pipeline_paired_v1"]
+    export_sha256: Sha256
+    export_unit_count: int
+    export_disposition_counts: dict[str, int]
+    protocol_sha256: Sha256
+    dataset_sha256: Sha256
+    locked_at: datetime
+
+    def verify(self, export: ExperimentExport) -> None:
+        """Raise unless this lock still matches the given export exactly."""
+
+        if self.export_schema_version != export.schema_version:
+            raise ValueError("Export lock schema version differs")
+        if self.experiment_scope != export.experiment_scope:
+            raise ValueError("Export lock scope differs")
+        if self.export_sha256 != export.content_sha256():
+            raise ValueError("Export lock does not match the export content hash")
+        if self.export_unit_count != export.unit_count:
+            raise ValueError("Export lock unit count differs")
+        if self.export_disposition_counts != export.disposition_counts:
+            raise ValueError("Export lock disposition counts differ")
+        if self.protocol_sha256 != export.protocol_sha256:
+            raise ValueError("Export lock protocol hash differs")
+        if self.dataset_sha256 != export.dataset_sha256:
+            raise ValueError("Export lock dataset hash differs")
+
+
+def lock_export(export: ExperimentExport, *, locked_at: datetime | None = None) -> ExportLock:
+    """Build the deterministic lock record for a finalized export."""
+
+    return ExportLock(
+        export_schema_version=export.schema_version,
+        experiment_scope=export.experiment_scope,
+        export_sha256=export.content_sha256(),
+        export_unit_count=export.unit_count,
+        export_disposition_counts=dict(export.disposition_counts),
+        protocol_sha256=export.protocol_sha256,
+        dataset_sha256=export.dataset_sha256,
+        locked_at=locked_at or datetime.now(UTC),
+    )
 
 
 def _disposition_counts(units: tuple[ExperimentUnit, ...]) -> dict[str, int]:
@@ -243,17 +328,40 @@ def build_export(
     )
 
 
-def write_export(export: ExperimentExport, path: Path) -> str:
-    """Write an immutable export and return its content hash."""
+def write_export(
+    export: ExperimentExport, path: Path, *, locked_at: datetime | None = None
+) -> ExportLock:
+    """Write an immutable export plus its lock record, and return the lock.
+
+    Refuses to overwrite either artifact. The export bytes on disk are the
+    exact content the lock's ``export_sha256`` was computed from, so the lock
+    can always be verified against the file it accompanies. ``locked_at`` is
+    injectable so the whole write path is deterministic under test.
+    """
 
     if path.exists():
         raise ValueError("Refusing to overwrite an existing experiment export")
+    lock_path = path.with_suffix(f"{path.suffix}.lock.json")
+    if lock_path.exists():
+        raise ValueError("Refusing to overwrite an existing experiment export lock")
+    lock = lock_export(export, locked_at=locked_at)
     path.write_text(
         json.dumps(export.model_dump(mode="json"), indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    return export.content_sha256()
+    lock_path.write_text(
+        json.dumps(lock.model_dump(mode="json"), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return lock
 
 
 def load_export(path: Path) -> ExperimentExport:
     return ExperimentExport.model_validate(json.loads(path.read_text(encoding="utf-8")))
+
+
+def load_export_lock(path: Path) -> ExportLock:
+    """Load the lock that accompanies the export at ``path``."""
+
+    lock_path = path.with_suffix(f"{path.suffix}.lock.json")
+    return ExportLock.model_validate(json.loads(lock_path.read_text(encoding="utf-8")))

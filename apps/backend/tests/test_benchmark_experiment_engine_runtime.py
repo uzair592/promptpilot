@@ -31,11 +31,13 @@ from promptpilot_backend.benchmark_experiment_results import (
     EvaluationArtifact,
     ExperimentUnit,
     HumanReviewPlan,
+    HumanReviewRecord,
     HumanReviewSampleSlot,
-    HumanReviewScore,
     QuestionArtifact,
     build_export,
     load_export,
+    load_export_lock,
+    lock_export,
     write_export,
 )
 from promptpilot_backend.db import SessionLocal
@@ -234,6 +236,88 @@ def _attempts(run_id) -> list[BenchmarkProviderCallAttempt]:
         )
 
 
+def test_provider_call_lifecycle_order_is_reserve_start_invoke_settle(
+    experiment_env, experiment_attempts
+) -> None:
+    """A provider may only run after a reservation exists and is started.
+
+    The injected offline provider records the ledger attempt status at the
+    moment it is invoked, proving the invocation cannot precede either step.
+    No network provider is involved.
+    """
+
+    executor = make_executor(experiment_env)
+    run_id = experiment_env.run_id
+    observed: list[tuple[str | None, int]] = []
+
+    def attempt_status() -> str | None:
+        rows = _attempts(run_id)
+        return rows[0].status if rows else None
+
+    provider = OfflineProvider()
+    original = provider.invoke
+
+    def observing_invoke() -> object:
+        observed.append((attempt_status(), len(_attempts(run_id))))
+        return original()
+
+    provider.invoke = observing_invoke  # type: ignore[method-assign]
+    assert attempt_status() is None
+
+    call = executor.execute(
+        provider=provider,
+        role="analysis",
+        stable_unit_id="task#r1",
+        task_id="planning-launch-001",
+        fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+        repetition=1,
+        provider_name="offline-test",
+        model_name="analysis-test-model",
+        request_payload={"p": "lifecycle"},
+        invoke=observing_invoke,
+        stable_token="unit1:analysis:lifecycle",
+    )
+
+    # 1. a reservation existed before the provider ran, and it was already started
+    assert observed == [("started", 1)]
+    # 2. the outcome is only recorded after the invocation returned
+    assert call.status == "succeeded"
+    assert attempt_status() == "succeeded"
+    assert [row.status for row in experiment_attempts(run_id)] == ["succeeded"]
+
+
+def test_provider_invocation_never_precedes_mark_started_on_failure(
+    experiment_env,
+) -> None:
+    """Even a failing provider is invoked only after reserve + start."""
+
+    executor = make_executor(experiment_env)
+    run_id = experiment_env.run_id
+    observed: list[str | None] = []
+
+    def observing_invoke() -> object:
+        rows = _attempts(run_id)
+        observed.append(rows[0].status if rows else None)
+        raise RuntimeError("simulated offline provider failure")
+
+    call = executor.execute(
+        provider=ExplodingProvider(),
+        role="analysis",
+        stable_unit_id="task#r2",
+        task_id="planning-launch-001",
+        fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+        repetition=2,
+        provider_name="offline-test",
+        model_name="analysis-test-model",
+        request_payload={"p": "lifecycle-fail"},
+        invoke=observing_invoke,
+        stable_token="unit1:analysis:lifecycle-fail",
+    )
+    assert observed == ["started"]
+    assert call.status == "failed"
+    assert _attempts(run_id)[0].status == "failed"
+
+
 def _assert_no_attempts(run_id) -> None:
     assert _attempts(run_id) == []
 
@@ -414,11 +498,75 @@ def test_export_preserves_every_disposition(tmp_path: Path) -> None:
         "invalid_pair": 1,
     }
     path = tmp_path / "export.json"
-    digest = write_export(export, path)
-    assert len(digest) == 64
+    lock = write_export(export, path)
+    assert len(lock.export_sha256) == 64
+    assert lock.export_sha256 == export.content_sha256()
+    assert lock.protocol_sha256 == PROTOCOL_SHA
+    assert lock.dataset_sha256 == DATASET_SHA
+    assert lock.export_unit_count == 4
     assert load_export(path).unit_count == 4
+    lock.verify(load_export(path))
     with pytest.raises(ValueError, match="Refusing to overwrite"):
         write_export(export, path)
+    with pytest.raises(ValueError, match="Refusing to overwrite"):
+        write_export(export, path)
+
+
+def test_export_lock_is_deterministic_and_external_to_the_export(
+    tmp_path: Path,
+) -> None:
+    """The lock must not perturb the bytes it hashes."""
+
+    export = build_export(
+        units=(_unit(),),
+        protocol_id="production_pipeline_paired_v1",
+        protocol_sha256=PROTOCOL_SHA,
+        dataset_name="promptpilot-experimental-v1",
+        dataset_sha256=DATASET_SHA,
+        execution_mode="offline_dry_run",
+        call_ceiling_total=168,
+    )
+    stamp = datetime(2026, 4, 1, tzinfo=UTC)
+    first = lock_export(export, locked_at=stamp)
+    second = lock_export(export, locked_at=stamp)
+    assert first == second
+    assert first.export_sha256 == second.export_sha256
+    # The lock is not a field of the export, so it cannot feed back into the hash.
+    assert "export_sha256" not in export.model_dump(mode="json")
+    path = tmp_path / "export.json"
+    write_export(export, path, locked_at=stamp)
+    assert load_export_lock(path) == first
+    lock_file = path.with_suffix(f"{path.suffix}.lock.json")
+    assert lock_file.exists()
+    assert "export_sha256" not in path.read_text(encoding="utf-8")
+
+
+def test_export_lock_detects_a_tampered_export() -> None:
+    export = build_export(
+        units=(_unit(),),
+        protocol_id="production_pipeline_paired_v1",
+        protocol_sha256=PROTOCOL_SHA,
+        dataset_name="promptpilot-experimental-v1",
+        dataset_sha256=DATASET_SHA,
+        execution_mode="offline_dry_run",
+        call_ceiling_total=168,
+    )
+    lock = lock_export(export, locked_at=datetime(2026, 4, 1, tzinfo=UTC))
+    lock.verify(export)
+    tampered = build_export(
+        units=(
+            _unit(),
+            _unit(unit_id="b#r1"),
+        ),
+        protocol_id="production_pipeline_paired_v1",
+        protocol_sha256=PROTOCOL_SHA,
+        dataset_name="promptpilot-experimental-v1",
+        dataset_sha256=DATASET_SHA,
+        execution_mode="offline_dry_run",
+        call_ceiling_total=168,
+    )
+    with pytest.raises(ValueError, match="does not match the export content hash"):
+        lock.verify(tampered)
 
 
 def test_analysis_reports_primary_and_exploratory_separately() -> None:
@@ -474,11 +622,61 @@ def test_human_review_plan_supports_the_approved_shape_without_scores() -> None:
         adjudication_required_above_threshold=True,
     )
     assert plan.populated is False
+    assert plan.review_record_count == 0
     assert plan.pair_count == 8 and plan.reviewer_count == 2
+    assert plan.disagreement_threshold_points == 20
 
 
-def test_human_review_slot_carries_neutral_labels_and_no_scores() -> None:
-    slot = HumanReviewSampleSlot(
+def test_blinded_sample_has_no_score_bearing_reviewer_field() -> None:
+    """The pre-review artifact is structurally incapable of holding scores."""
+
+    fields = set(HumanReviewSampleSlot.model_fields)
+    for forbidden in ("reviewers", "scores", "human_review_scores", "score"):
+        assert forbidden not in fields
+    assert "reviewer_id" not in fields
+    assert "HumanReviewRecord" not in HumanReviewSampleSlot.__doc__ or "only" in (
+        HumanReviewSampleSlot.__doc__
+    )
+    serialized = HumanReviewSampleSlot(
+        pair_id="pair-1",
+        task_id="planning-launch-001",
+        repetition=1,
+        preselected=True,
+        response_a="neutral text",
+        response_b="neutral text",
+        neutral_label_mapping_stored_separately=True,
+    ).model_dump(mode="json")
+    for key in ("reviewers", "scores", "score", "reviewer_id"):
+        assert key not in serialized
+    assert serialized["review_status"] == "pending"
+    assert serialized["adjudication_status"] == "not_required"
+
+
+def test_blinded_sample_rejects_a_reviewers_field_entirely() -> None:
+    """Because the model forbids extra fields, scores cannot be smuggled in."""
+
+    with pytest.raises(ValueError):
+        HumanReviewSampleSlot(
+            pair_id="pair-1",
+            task_id="planning-launch-001",
+            repetition=1,
+            preselected=True,
+            response_a="a",
+            response_b="b",
+            neutral_label_mapping_stored_separately=True,
+            reviewers=(
+                HumanReviewRecord(
+                    pair_id="pair-1",
+                    reviewer_id="external-ref-1",
+                    dimension="clarity",
+                    score=90,
+                ),
+            ),
+        )
+
+
+def test_blinded_sample_exposes_no_condition_or_model_identity() -> None:
+    sample = HumanReviewSampleSlot(
         pair_id="pair-1",
         task_id="planning-launch-001",
         repetition=1,
@@ -487,19 +685,74 @@ def test_human_review_slot_carries_neutral_labels_and_no_scores() -> None:
         response_b="neutral text",
         neutral_label_mapping_stored_separately=True,
     )
-    assert slot.score_count == 0
-    assert slot.rubric_version == "v1"
-    assert slot.adjudication_status == "pending"
-    assert "baseline" not in slot.model_dump_json().casefold()
+    payload = sample.model_dump_json().casefold()
+    for identity in ("baseline", "promptpilot", "model", "provider", "condition"):
+        assert identity not in payload
+    assert sample.awaiting_review is True
 
 
-def test_human_review_scores_are_v1_dimensions_only() -> None:
-    score = HumanReviewScore(reviewer_id="external-ref-1", dimension="clarity", score=88)
-    assert score.flagged_disagreement is False
+def test_review_records_live_only_in_the_separate_structure() -> None:
+    plan = HumanReviewPlan(
+        pair_count=8,
+        reviewer_count=2,
+        disagreement_threshold_points=20,
+        adjudication_required_above_threshold=True,
+        slots=(
+            HumanReviewSampleSlot(
+                pair_id="pair-1",
+                task_id="planning-launch-001",
+                repetition=1,
+                preselected=True,
+                response_a="neutral text",
+                response_b="neutral text",
+                neutral_label_mapping_stored_separately=True,
+            ),
+        ),
+    )
+    assert plan.review_record_count == 0
+    assert "records" not in plan.slots[0].model_dump(mode="json")
+    record = HumanReviewRecord(
+        pair_id="pair-1",
+        reviewer_id="external-ref-1",
+        dimension="clarity",
+        score=88,
+        flagged_disagreement=True,
+    )
+    with_records = plan.model_copy(update={"records": (record,)})
+    assert with_records.review_record_count == 1
+    assert len(with_records.disagreements_above_threshold()) == 1
+    assert "score" not in plan.slots[0].model_dump(mode="json")
+
+
+def test_review_records_enforce_v1_dimensions_and_score_range() -> None:
+    record = HumanReviewRecord(
+        pair_id="pair-1",
+        reviewer_id="external-ref-1",
+        dimension="clarity",
+        score=88,
+    )
+    assert record.flagged_disagreement is False
+    for dimension in (
+        "relevance",
+        "completeness",
+        "instruction_following",
+        "contextual_grounding",
+        "clarity",
+    ):
+        assert HumanReviewRecord(
+            pair_id="p", reviewer_id="r", dimension=dimension, score=0
+        ).score == 0
+        assert HumanReviewRecord(
+            pair_id="p", reviewer_id="r", dimension=dimension, score=100
+        ).score == 100
     with pytest.raises(ValueError):
-        HumanReviewScore(reviewer_id="r", dimension="invented_dimension", score=50)
+        HumanReviewRecord(
+            pair_id="p", reviewer_id="r", dimension="invented_dimension", score=50
+        )
     with pytest.raises(ValueError):
-        HumanReviewScore(reviewer_id="r", dimension="clarity", score=101)
+        HumanReviewRecord(pair_id="p", reviewer_id="r", dimension="clarity", score=101)
+    with pytest.raises(ValueError):
+        HumanReviewRecord(pair_id="p", reviewer_id="r", dimension="clarity", score=-1)
 
 
 # --------------------------------------------------------------------------

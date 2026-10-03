@@ -3,10 +3,15 @@
 Every provider-backed stage in a future live run must pass through
 :class:`ProviderCallExecutor`. The authoritative sequence is::
 
-    reserve_call -> provider invocation -> mark_started -> mark_succeeded|mark_failed
+    reserve_call
+        -> mark_started
+        -> provider invocation
+        -> mark_succeeded OR mark_failed
 
-A provider is never invoked before a successful reservation, so budget cannot
-be exceeded and no call can disappear from the ledger.
+The provider is never invoked until a reservation has been committed *and* the
+attempt has been transitioned to ``started``. Budget cannot be exceeded and no
+call can disappear from the ledger, because the role counter is consumed at
+reservation time and the outcome is always settled explicitly.
 
 This milestone exposes exactly one execution mode, ``offline_dry_run``, which
 admits only providers explicitly marked ``offline_fixture = True``. There is no

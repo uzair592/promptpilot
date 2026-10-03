@@ -166,3 +166,40 @@ def test_no_new_source_file_defines_a_live_runner_entrypoint() -> None:
         assert "argparse" not in source, f"{path.name} adds a CLI"
         assert "APIRouter" not in source, f"{path.name} adds a route"
         assert "def main(" not in source, f"{path.name} adds an entrypoint"
+
+
+# --- Provider-call lifecycle documentation must match the implementation ----
+
+STALE_LIFECYCLE = (
+    "reserve_call -> provider invocation",
+    "reserve_call  ->  provider invocation",
+    "reserve_call -> invoke",
+)
+
+
+def test_module_docstring_states_the_correct_lifecycle_order() -> None:
+    source = inspect.getsource(benchmark_experiment_execution)
+    header = source[: source.index('"""', source.index('"""') + 3)]
+    assert "reserve_call" in header
+    assert "mark_started" in header
+    # The header must not imply the provider runs before mark_started.
+    assert header.index("reserve_call") < header.index("mark_started")
+
+
+def test_engine_sources_contain_no_stale_lifecycle_sequence() -> None:
+    src = Path(inspect.getfile(OpenAICompatibleProvider)).parent
+    for path in sorted(src.glob("benchmark_experiment_*.py")):
+        lowered = path.read_text(encoding="utf-8").replace("\n", " ")
+        for stale in STALE_LIFECYCLE:
+            assert stale not in lowered, f"{path.name} documents the stale sequence {stale!r}"
+
+
+def test_research_docs_document_the_correct_lifecycle_order() -> None:
+    docs = Path(__file__).resolve().parents[3] / "docs/research"
+    target = docs / "live-runner-operations-v1.md"
+    assert target.exists()
+    text = target.read_text(encoding="utf-8").replace("\n", " ")
+    assert "reserve_call  ->  provider invocation" not in text
+    assert "provider invocation  ->  mark_started" not in text
+    for stale in STALE_LIFECYCLE:
+        assert stale not in text, f"operations doc documents stale sequence {stale!r}"

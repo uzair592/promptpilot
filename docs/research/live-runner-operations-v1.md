@@ -15,8 +15,8 @@ implemented as an executable live path in this milestone.
 |---|---|---|
 | Launch authorization boundary | `benchmark_experiment_authorization.py` | Models an externally issued authorization claim and a fail-closed launch gate. Never manufactures approval. |
 | Protocol/fixture binding | `benchmark_experiment_binding.py` | Pins a run to the exact protocol, dataset, fixture hashes, and target parameters it was admitted against. |
-| Provider-call execution gate | `benchmark_experiment_execution.py` | Forces every provider-backed stage through `reserve_call -> mark_started -> mark_succeeded/mark_failed`. Offline dry-run mode only. |
-| Results and export contract | `benchmark_experiment_results.py` | Immutable per-unit provenance, four explicit dispositions, human-review schema. |
+| Provider-call execution gate | `benchmark_experiment_execution.py` | Forces every provider-backed stage through `reserve_call -> mark_started -> provider invocation -> mark_succeeded/mark_failed`. Offline dry-run mode only. |
+| Results and export contract | `benchmark_experiment_results.py` | Immutable per-unit provenance, four explicit dispositions, score-free blinded review samples separated from human review records, export plus `ExportLock`. |
 | Analysis and dry-run planning | `benchmark_experiment_analysis.py` | Deterministic aggregation over frozen strata and the offline workload plan. |
 
 ## What this milestone deliberately does not add
@@ -87,11 +87,31 @@ approval. Software supplies none of these and must not guess any of them.
 11. **Controlled benchmark run.** Every provider call is reserved before it is
     invoked. No reservation, no call.
 12. **Immutable export.** Results are exported with every unit's disposition and
-    reason code. Unsuccessful units are retained, never deleted.
-13. **Results locked.** The export hash is recorded. Post-hoc edits require a
-    new export version.
+    reason code. Unsuccessful units are retained, never deleted. `write_export`
+    refuses to overwrite an existing export, writes a companion
+    `ExportLock` record beside it, and returns that lock.
+13. **Results locked.** The companion `ExportLock` records the export content
+    SHA-256, export schema version, protocol SHA-256, dataset SHA-256, unit
+    count, disposition counts, and a lock timestamp. The lock is derived from
+    the exact serialized export bytes and is stored *outside* the export, so the
+    hash cannot be perturbed by the lock's own fields. `ExportLock.verify`
+    re-checks the export against the lock and fails on any mismatch.
 14. **Analysis without methodology change.** Aggregation runs over the frozen
     strata. Additional breakdowns are labelled exploratory.
+
+### Human-review sample and review results are separate types
+
+The pre-review artifact is structurally score-free:
+
+| Type | Responsibility | May carry scores? |
+|---|---|---|
+| `HumanReviewSampleSlot` | blinded pair awaiting review: pair id, task id, repetition, response A, response B, neutral-label reference, rubric version, review/adjudication status | **No** — has no reviewer field and no score field at all |
+| `HumanReviewRecord` | actual reviewer + dimension + score + notes + disagreement flag | Yes, and only here |
+
+`HumanReviewPlan.slots` holds the score-free samples; `HumanReviewPlan.records`
+holds real review data and is empty until a human actually reviews a pair. The
+application never populates it. The blinded sample exposes no condition or
+model identity, so a reviewer cannot infer which response is the baseline.
 
 ## Launch gate
 
@@ -156,13 +176,17 @@ without `offline_fixture = True` and rejects `OpenAICompatibleProvider` by type.
 The authoritative order is:
 
 ```
-reserve_call  ->  provider invocation  ->  mark_started  ->  mark_succeeded / mark_failed
+reserve_call
+    -> mark_started
+    -> provider invocation
+    -> mark_succeeded OR mark_failed
 ```
 
-A provider is never invoked before a successful reservation, so a call can
-neither exceed the ceiling nor vanish from the ledger. There is no hidden safety
-budget and no silent ceiling increase. Replaying an identical idempotency key
-returns the recorded outcome without invoking the provider again.
+A provider is never invoked before **both** a successful reservation and the
+transition to `started`. The role counter is consumed at reservation time, so a
+call can neither exceed the ceiling nor vanish from the ledger. There is no
+hidden safety budget and no silent ceiling increase. Replaying an identical
+idempotency key returns the recorded outcome without invoking the provider again.
 
 ## Provider failure handling
 
