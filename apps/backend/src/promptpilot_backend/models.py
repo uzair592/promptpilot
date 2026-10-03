@@ -486,6 +486,14 @@ class BenchmarkExperimentRun(Base):
             "spent_currency IS NULL OR budget_currency IS NULL OR spent_currency = budget_currency",
             name="ck_benchmark_experiment_runs_spend_currency_match",
         ),
+        CheckConstraint(
+            "reserved_spend >= 0",
+            name="ck_benchmark_experiment_runs_reserved_spend_nonnegative",
+        ),
+        CheckConstraint(
+            "max_spend IS NULL OR (spent_amount + reserved_spend) <= max_spend",
+            name="ck_benchmark_experiment_runs_spend_reserved_within_limit",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -525,6 +533,7 @@ class BenchmarkExperimentRun(Base):
     max_spend: Mapped[float | None] = mapped_column(Float)
     spent_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     spent_currency: Mapped[str | None] = mapped_column(String(3))
+    reserved_spend: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     external_human_approval_verified: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

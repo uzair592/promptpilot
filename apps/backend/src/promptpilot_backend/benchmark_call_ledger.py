@@ -487,8 +487,49 @@ class BenchmarkCallLedger:
                         "Estimated cost currency differs from run budget currency",
                     )
 
-            counter_name = _ROLE_COUNTERS[checked.provider_role]
+            # Atomically reserve monetary budget
+            if checked.estimated_cost is not None:
+                if run.max_spend is None:
+                    raise LedgerError(
+                        "monetary_budget_not_configured",
+                        "Monetary budget not configured for this experiment run",
+                    )
+                projected = run.spent_amount + run.reserved_spend + checked.estimated_cost
+                if run.max_spend is not None and projected > run.max_spend:
+                    raise LedgerError(
+                        "monetary_budget_exhausted",
+                        "Estimated cost would exceed authorized monetary budget",
+                    )
+                if checked.currency != run.budget_currency:
+                    raise LedgerError(
+                        "currency_mismatch",
+                        "Estimated cost currency differs from run budget currency",
+                    )
+
+                # Atomically reserve monetary budget
+                updated = cast(
+                    CursorResult[Any],
+                    db.execute(
+                        update(BenchmarkExperimentRun)
+                        .where(
+                            BenchmarkExperimentRun.id == run_id,
+                            BenchmarkExperimentRun.reserved_spend
+                            + checked.estimated_cost
+                            <= run.max_spend,
+                        )
+                        .values(
+                            reserved_spend=BenchmarkExperimentRun.reserved_spend
+                            + checked.estimated_cost,
+                        )
+                    )
+                )
+                if updated.rowcount != 1:
+                    raise LedgerError(
+                        "monetary_budget_exhausted",
+                        "Estimated cost would exceed authorized monetary budget",
+                    )
             ceiling_name = _ROLE_CEILINGS[checked.provider_role]
+            counter_name = _ROLE_COUNTERS[checked.provider_role]
             counter = getattr(BenchmarkExperimentRun, counter_name)
             ceiling = getattr(BenchmarkExperimentRun, ceiling_name)
             total_consumed = (
