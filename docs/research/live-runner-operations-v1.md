@@ -90,12 +90,14 @@ approval. Software supplies none of these and must not guess any of them.
     reason code. Unsuccessful units are retained, never deleted. `write_export`
     refuses to overwrite an existing export, writes a companion
     `ExportLock` record beside it, and returns that lock.
-13. **Results locked.** The companion `ExportLock` records the export content
-    SHA-256, export schema version, protocol SHA-256, dataset SHA-256, unit
-    count, disposition counts, and a lock timestamp. The lock is derived from
-    the exact serialized export bytes and is stored *outside* the export, so the
-    hash cannot be perturbed by the lock's own fields. `ExportLock.verify`
-    re-checks the export against the lock and fails on any mismatch.
+13. **Results locked.** The companion `ExportLock` records the SHA-256 of the
+    exact UTF-8 bytes written to the export file, plus the export schema
+    version, protocol SHA-256, dataset SHA-256, unit count, disposition counts,
+    and a lock timestamp. The lock is derived from the serialized export bytes
+    and is stored *outside* the export, so the hash cannot be perturbed by the
+    lock's own fields. Verification re-hashes the file as stored rather than
+    re-serializing a parsed model, so any change to the bytes is caught even
+    when the document still parses to an equivalent export.
 14. **Analysis without methodology change.** Aggregation runs over the frozen
     strata. Additional breakdowns are labelled exploratory.
 

@@ -1,5 +1,5 @@
-"""Ledger-gated execution, dry-run planning, export, and analysis coverage."""
-
+import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -29,6 +29,7 @@ from promptpilot_backend.benchmark_experiment_execution import (
 )
 from promptpilot_backend.benchmark_experiment_results import (
     EvaluationArtifact,
+    ExperimentExport,
     ExperimentUnit,
     HumanReviewPlan,
     HumanReviewRecord,
@@ -565,8 +566,70 @@ def test_export_lock_detects_a_tampered_export() -> None:
         execution_mode="offline_dry_run",
         call_ceiling_total=168,
     )
-    with pytest.raises(ValueError, match="does not match the export content hash"):
+    with pytest.raises(ValueError, match="does not match the export file bytes"):
         lock.verify(tampered)
+
+
+def test_export_lock_hash_is_the_exact_file_bytes(tmp_path: Path) -> None:
+    """The lock must describe the file's bytes, not a canonical re-serialization."""
+
+    export = build_export(
+        units=(_unit(),),
+        protocol_id="production_pipeline_paired_v1",
+        protocol_sha256=PROTOCOL_SHA,
+        dataset_name="promptpilot-experimental-v1",
+        dataset_sha256=DATASET_SHA,
+        execution_mode="offline_dry_run",
+        call_ceiling_total=168,
+    )
+    path = tmp_path / "export.json"
+    lock = write_export(export, path, locked_at=datetime(2026, 4, 1, tzinfo=UTC))
+    written = path.read_bytes()
+    # The lock hash is literally sha256 of the bytes on disk.
+    assert lock.export_sha256 == hashlib.sha256(written).hexdigest()
+    assert lock.export_sha256 == export.content_sha256()
+    # Verification re-hashes the file as stored.
+    assert lock.verify_file(path).unit_count == 1
+    assert lock.verify_bytes(written).unit_count == 1
+
+
+def test_export_lock_detects_a_byte_tamper_that_still_parses(tmp_path: Path) -> None:
+    """Re-indenting the file changes bytes but not the model: still detected.
+
+    This is exactly the case a re-serialization-based check would miss.
+    """
+
+    export = build_export(
+        units=(_unit(),),
+        protocol_id="production_pipeline_paired_v1",
+        protocol_sha256=PROTOCOL_SHA,
+        dataset_name="promptpilot-experimental-v1",
+        dataset_sha256=DATASET_SHA,
+        execution_mode="offline_dry_run",
+        call_ceiling_total=168,
+    )
+    path = tmp_path / "export.json"
+    lock = write_export(export, path, locked_at=datetime(2026, 4, 1, tzinfo=UTC))
+    original = path.read_bytes()
+
+    # Compact the same document: parses to an identical model, different bytes.
+    reserialized = json.dumps(
+        export.model_dump(mode="json"), separators=(",", ":"), sort_keys=True
+    ).encode("utf-8")
+    assert json.loads(reserialized.decode("utf-8")) == json.loads(original.decode("utf-8"))
+
+    # A model-only check cannot see the difference.
+    assert (
+        ExperimentExport.model_validate(json.loads(reserialized.decode())).content_sha256()
+        == export.content_sha256()
+    )
+    # The byte-level check does.
+    with pytest.raises(ValueError, match="does not match the export file bytes"):
+        lock.verify_bytes(reserialized)
+
+    path.write_bytes(reserialized)
+    with pytest.raises(ValueError, match="does not match the export file bytes"):
+        lock.verify_file(path)
 
 
 def test_analysis_reports_primary_and_exploratory_separately() -> None:

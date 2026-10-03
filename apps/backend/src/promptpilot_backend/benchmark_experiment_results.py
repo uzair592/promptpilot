@@ -11,6 +11,7 @@ review data is fabricated by this module.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .benchmark_call_ledger import TargetCondition, canonical_artifact_sha256
+from .benchmark_call_ledger import TargetCondition
 from .evaluation_service import RUBRIC_VERSION
 from .production_benchmark_protocol import Sha256
 
@@ -233,16 +234,37 @@ class ExperimentExport(StrictResultModel):
     call_ceiling_total: int
     units: tuple[ExperimentUnit, ...]
 
+    def serialize(self) -> bytes:
+        """The exact UTF-8 bytes written to the export file.
+
+        This is the single serialization used by both the writer and the lock,
+        so the recorded hash always describes the real file contents. It is
+        deterministic: identical models always produce identical bytes.
+        """
+
+        return json.dumps(
+            self.model_dump(mode="json"),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        ).encode("utf-8")
+
     def content_sha256(self) -> str:
-        return canonical_artifact_sha256(self.model_dump(mode="json"))
+        """SHA-256 of the exact export file bytes, not a re-serialization."""
+
+        return hashlib.sha256(self.serialize()).hexdigest()
 
 
 class ExportLock(StrictResultModel):
-    """An immutable lock record binding one export file to its content hash.
+    """An immutable lock record binding one export file to its exact bytes.
 
-    The lock is derived from the exact serialized export content. It is a
-    *separate* artifact and is never embedded in the export, so hashing the
-    export cannot be perturbed by the lock's own bytes.
+    ``export_sha256`` is the SHA-256 of the precise UTF-8 bytes written to the
+    export file, not of a re-serialized model. Verification therefore re-hashes
+    the file as it exists on disk, so any edit to the bytes is detected even
+    when the document still parses to an equivalent model.
+
+    The lock is a *separate* artifact and is never embedded in the export, so
+    hashing the export cannot be perturbed by the lock's own fields.
     """
 
     lock_version: Literal["v1"] = "v1"
@@ -255,8 +277,27 @@ class ExportLock(StrictResultModel):
     dataset_sha256: Sha256
     locked_at: datetime
 
-    def verify(self, export: ExperimentExport) -> None:
-        """Raise unless this lock still matches the given export exactly."""
+    def verify_bytes(self, payload: bytes) -> ExperimentExport:
+        """Re-hash real export bytes and return the parsed export.
+
+        This is the authoritative check: it hashes the bytes as stored rather
+        than re-serializing a parsed model.
+        """
+
+        actual = hashlib.sha256(payload).hexdigest()
+        if self.export_sha256 != actual:
+            raise ValueError("Export lock does not match the export file bytes")
+        export = ExperimentExport.model_validate(json.loads(payload.decode("utf-8")))
+        self.verify_metadata(export)
+        return export
+
+    def verify_file(self, path: Path) -> ExperimentExport:
+        """Verify the lock against the export file currently on disk."""
+
+        return self.verify_bytes(path.read_bytes())
+
+    def verify_metadata(self, export: ExperimentExport) -> None:
+        """Check the non-hash lock fields against a parsed export."""
 
         if self.export_schema_version != export.schema_version:
             raise ValueError("Export lock schema version differs")
@@ -273,9 +314,25 @@ class ExportLock(StrictResultModel):
         if self.dataset_sha256 != export.dataset_sha256:
             raise ValueError("Export lock dataset hash differs")
 
+    def verify(self, export: ExperimentExport) -> None:
+        """Verify the lock against an in-memory export.
 
-def lock_export(export: ExperimentExport, *, locked_at: datetime | None = None) -> ExportLock:
-    """Build the deterministic lock record for a finalized export."""
+        Equivalent to :meth:`verify_bytes` for a model built in memory, because
+        serialization is deterministic. Prefer :meth:`verify_file` when checking
+        an artifact that has already been written.
+        """
+
+        self.verify_bytes(export.serialize())
+
+
+def lock_export(
+    export: ExperimentExport, *, locked_at: datetime | None = None
+) -> ExportLock:
+    """Build the deterministic lock record for a finalized export.
+
+    ``export_sha256`` is computed from :meth:`ExperimentExport.serialize`, the
+    same bytes :func:`write_export` writes to disk.
+    """
 
     return ExportLock(
         export_schema_version=export.schema_version,
@@ -345,13 +402,14 @@ def write_export(
     if lock_path.exists():
         raise ValueError("Refusing to overwrite an existing experiment export lock")
     lock = lock_export(export, locked_at=locked_at)
-    path.write_text(
-        json.dumps(export.model_dump(mode="json"), indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-    lock_path.write_text(
-        json.dumps(lock.model_dump(mode="json"), indent=2, sort_keys=True),
-        encoding="utf-8",
+    payload = export.serialize()
+    if hashlib.sha256(payload).hexdigest() != lock.export_sha256:
+        raise ValueError("Export lock does not describe the bytes being written")
+    path.write_bytes(payload)
+    lock_path.write_bytes(
+        json.dumps(
+            lock.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=False
+        ).encode("utf-8")
     )
     return lock
 
