@@ -448,6 +448,13 @@ class LiveExperimentRunner:
                 "adapter_mode_mismatch",
                 "Provider adapter mode differs from the authorized execution mode",
             )
+        try:
+            adapter_factory.assert_protocol(protocol)
+        except ValueError as error:
+            raise ExecutionGateError(
+                "adapter_protocol_mismatch",
+                "Provider pricing and assignments are not bound to the runner protocol",
+            ) from error
         if (
             protocol.evaluation.primary != "llm_judge"
             or binding.evaluation_primary != "llm_judge"

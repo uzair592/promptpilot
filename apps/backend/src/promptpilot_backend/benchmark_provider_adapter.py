@@ -13,8 +13,18 @@ from __future__ import annotations
 import json
 import math
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict
+
+from .benchmark_pricing import (
+    CostEstimate,
+    PricingSnapshotError,
+    ProviderPricingSnapshot,
+    validate_pricing_snapshot,
+)
+from .config import get_settings
+from .production_benchmark_protocol import LiveStudyProtocol, protocol_sha256
 
 # Provider role types are defined in benchmark_call_ledger
 
@@ -246,7 +256,9 @@ class OfflineProviderAdapter:
         )
 
     def estimate_cost(self, request_payload: Any) -> float:
-        return 0.0
+        raise AdapterConfigurationError(
+            "Offline fixture estimates cannot be used for budgeted live execution"
+        )
 
 
 class LiveProviderAdapter:
@@ -262,6 +274,7 @@ class LiveProviderAdapter:
         role: str,
         provider_name: str,
         model_name: str,
+        pricing_snapshot: ProviderPricingSnapshot,
     ) -> None:
         if getattr(llm_provider, "name", None) != provider_name:
             raise AdapterConfigurationError(
@@ -275,6 +288,11 @@ class LiveProviderAdapter:
         self._role = role
         self._provider_name = provider_name
         self._model_name = model_name
+        self._pricing_snapshot = pricing_snapshot
+        try:
+            pricing_snapshot.model_pricing(provider_name, model_name)
+        except PricingSnapshotError as error:
+            raise AdapterConfigurationError(str(error)) from error
 
     @property
     def role(self) -> str:
@@ -309,7 +327,7 @@ class LiveProviderAdapter:
             "output_tokens": result.get("usage", {}).get("completion_tokens"),
             "total_tokens": result.get("usage", {}).get("total_tokens"),
             "cost_estimate": None,
-            "currency": "USD",
+            "currency": self._pricing_snapshot.currency,
             "response_metadata": {"finish_reason": result.get("finish_reason")},
         }
 
@@ -332,7 +350,7 @@ class LiveProviderAdapter:
             "output_tokens": None,
             "total_tokens": None,
             "cost_estimate": None,
-            "currency": "USD",
+            "currency": self._pricing_snapshot.currency,
             "response_metadata": {},
         }
 
@@ -355,7 +373,7 @@ class LiveProviderAdapter:
             "output_tokens": None,
             "total_tokens": None,
             "cost_estimate": None,
-            "currency": "USD",
+            "currency": self._pricing_snapshot.currency,
             "response_metadata": {},
         }
 
@@ -378,7 +396,7 @@ class LiveProviderAdapter:
             "output_tokens": None,
             "total_tokens": None,
             "cost_estimate": None,
-            "currency": "USD",
+            "currency": self._pricing_snapshot.currency,
             "response_metadata": {},
         }
 
@@ -399,30 +417,57 @@ class LiveProviderAdapter:
             "output_tokens": None,
             "total_tokens": None,
             "cost_estimate": None,
-            "currency": "USD",
+            "currency": self._pricing_snapshot.currency,
             "response_metadata": {},
         }
 
     def health_check(self) -> bool:
         return True
 
-    def estimate_cost(self, request_payload: Any) -> float | None:
-        estimator = getattr(self._llm_provider, "estimate_cost", None)
-        if not callable(estimator):
-            return None
-        estimate = estimator(request_payload)
-        if estimate is None:
-            return None
-        if (
-            isinstance(estimate, bool)
-            or not isinstance(estimate, (int, float))
-            or not math.isfinite(estimate)
-            or estimate < 0
-        ):
-            raise AdapterConfigurationError(
-                "Live provider returned an invalid pre-call cost estimate"
-            )
-        return float(estimate)
+    def estimate_cost(self, request_payload: Any) -> CostEstimate:
+        if request_payload is None:
+            raise AdapterConfigurationError("A provider request payload is required for pricing")
+        try:
+            return self._pricing_snapshot.estimate(self._provider_name, self._model_name)
+        except PricingSnapshotError as error:
+            raise AdapterConfigurationError(str(error)) from error
+
+
+def live_provider_configuration_matches(protocol: LiveStudyProtocol) -> bool:
+    """Check runtime provider identity and secret availability without making a call."""
+
+    try:
+        settings = get_settings()
+        parsed_url = urlparse(settings.llm_base_url)
+    except (TypeError, ValueError):
+        return False
+    if (
+        not settings.llm_provider
+        or not settings.llm_model
+        or not settings.llm_api_key
+        or parsed_url.scheme != "https"
+        or not parsed_url.hostname
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or parsed_url.query
+        or parsed_url.fragment
+        or not math.isfinite(settings.llm_timeout)
+        or settings.llm_timeout <= 0
+    ):
+        return False
+    assignments = [
+        protocol.providers.analysis,
+        protocol.providers.question_generation,
+        protocol.providers.prompt_generation,
+        protocol.providers.baseline_target,
+    ]
+    if protocol.providers.judge is not None:
+        assignments.append(protocol.providers.judge)
+    runtime_identity = (settings.llm_provider, settings.llm_model)
+    return all(
+        (assignment.provider, assignment.model) == runtime_identity
+        for assignment in assignments
+    )
 
 
 class ProviderAdapterFactory:
@@ -433,15 +478,54 @@ class ProviderAdapterFactory:
     launch authorization and creates live adapters.
     """
 
-    def __init__(self, execution_mode: Literal["offline_dry_run", "live"]) -> None:
+    def __init__(
+        self,
+        execution_mode: Literal["offline_dry_run", "live"],
+        *,
+        protocol: LiveStudyProtocol | None = None,
+        pricing_snapshot: ProviderPricingSnapshot | None = None,
+    ) -> None:
         if execution_mode not in ("offline_dry_run", "live"):
             raise ValueError(f"Invalid execution mode: {execution_mode}")
+        if execution_mode == "live":
+            if protocol is None or pricing_snapshot is None:
+                raise AdapterConfigurationError(
+                    "Live adapter creation requires the frozen protocol and pinned pricing"
+                )
+            try:
+                validate_pricing_snapshot(pricing_snapshot, protocol)
+            except PricingSnapshotError as error:
+                raise AdapterConfigurationError(str(error)) from error
+            if not live_provider_configuration_matches(protocol):
+                raise AdapterConfigurationError(
+                    "Runtime provider identity, HTTPS endpoint, model, or credentials "
+                    "do not match the frozen protocol"
+                )
         self._mode = execution_mode
         self._offline_adapters: dict[str, Any] = {}
+        self._protocol = protocol
+        self._pricing_snapshot = pricing_snapshot
 
     @property
     def mode(self) -> str:
         return self._mode
+
+    def assert_protocol(self, protocol: LiveStudyProtocol) -> None:
+        """Ensure the factory pricing and provider mapping are bound to this protocol."""
+
+        if (
+            self._mode != "live"
+            or self._protocol is None
+            or self._pricing_snapshot is None
+            or protocol_sha256(self._protocol) != protocol_sha256(protocol)
+        ):
+            raise AdapterConfigurationError(
+                "Live adapter factory is not bound to the runner's frozen protocol"
+            )
+        try:
+            validate_pricing_snapshot(self._pricing_snapshot, protocol)
+        except PricingSnapshotError as error:
+            raise AdapterConfigurationError(str(error)) from error
 
     def create_adapter(
         self,
@@ -464,10 +548,30 @@ class ProviderAdapterFactory:
             return adapter
 
         if self._mode == "live":
-            # Live mode requires explicit launch authorization
-            # which is verified by the launch gate before factory creation
+            # Pricing and runtime identity are bound here; this does not verify
+            # human authorization or make the launch gate ready.
             from .llm_provider import OpenAICompatibleProvider
 
+            if self._protocol is None or self._pricing_snapshot is None:
+                raise AdapterConfigurationError(
+                    "Live pricing configuration is unavailable"
+                )
+            assignments = self._protocol.providers
+            assignment_by_role = {
+                "analysis": assignments.analysis,
+                "question_generation": assignments.question_generation,
+                "prompt_generation": assignments.prompt_generation,
+                "target_execution": assignments.baseline_target,
+                "judge": assignments.judge,
+            }
+            assignment = assignment_by_role.get(role)
+            if (
+                assignment is None
+                or (assignment.provider, assignment.model) != (provider, model)
+            ):
+                raise AdapterConfigurationError(
+                    "Requested provider/model does not match the frozen role assignment"
+                )
             llm_provider = OpenAICompatibleProvider()
             if llm_provider.name != provider or llm_provider.model != model:
                 raise AdapterConfigurationError(
@@ -475,9 +579,10 @@ class ProviderAdapterFactory:
                 )
             return LiveProviderAdapter(
                 llm_provider=llm_provider,
-                role=provider,
+                role=role,
                 provider_name=provider,
                 model_name=model,
+                pricing_snapshot=self._pricing_snapshot,
             )
 
         raise ValueError(f"Unknown execution mode: {self._mode}")

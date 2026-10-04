@@ -162,11 +162,12 @@ class LaunchGateBlocker(BaseModel):
 
 
 class LaunchGateReport(BaseModel):
-    """Fail-closed readiness report. ``ready`` requires every gate to pass."""
+    """Technical preflight; ``ready`` is reserved for external human admission."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     protocol_locked: bool
+    admission_ready: bool
     fixtures_live_eligible: bool
     fixture_ids: tuple[str, ...]
     authorization_present: bool
@@ -174,6 +175,10 @@ class LaunchGateReport(BaseModel):
     provider_authorized: bool
     spending_authorized: bool
     provider_model_authorized: bool
+    budget_authorized: bool
+    pricing_snapshot_valid: bool
+    provider_configuration_valid: bool
+    technical_ready: bool
     ready: bool
     blockers: tuple[LaunchGateBlocker, ...]
     software_verification_limit: str
@@ -187,7 +192,7 @@ _SOFTWARE_LIMIT = (
     "Software verifies only the presence, shape, and protocol binding of an "
     "externally issued authorization. Authenticity of the issuer, any signature, "
     "and any consent remain unverified claims requiring out-of-band human "
-    "confirmation."
+    "confirmation; this report can never authorize live execution."
 )
 
 
@@ -200,6 +205,12 @@ def evaluate_launch_gate(
     authorization: LiveLaunchAuthorization | None,
     target_provider: str,
     target_model: str,
+    pricing_snapshot_valid: bool = False,
+    budget_currency: str | None = None,
+    budget_maximum_cost: float | None = None,
+    required_provider_assignments: Sequence[tuple[str, str]] = (),
+    provider_configuration_valid: bool = False,
+    admission_ready: bool = False,
 ) -> LaunchGateReport:
     """Compute live-launch readiness without ever manufacturing authorization."""
 
@@ -210,6 +221,7 @@ def evaluate_launch_gate(
     provider_ok = False
     spending_ok = False
     provider_model_ok = False
+    budget_ok = False
     if authorization is not None:
         binds = authorization.protocol_sha256 == protocol_sha256
         provider_ok = authorization.provider_authorized is True
@@ -218,6 +230,17 @@ def evaluate_launch_gate(
             binds
             and (authorization.authorized_provider, authorization.authorized_model)
             == (target_provider, target_model)
+            and all(
+                (authorization.authorized_provider, authorization.authorized_model)
+                == assignment
+                for assignment in required_provider_assignments
+            )
+        )
+        budget_ok = (
+            budget_currency is not None
+            and budget_maximum_cost is not None
+            and authorization.spend_currency == budget_currency
+            and authorization.maximum_spend == budget_maximum_cost
         )
     fixtures_ok = bool(requested) and set(requested) <= set(eligible)
 
@@ -226,6 +249,13 @@ def evaluate_launch_gate(
         blockers.append(
             LaunchGateBlocker(
                 code="protocol_not_locked", message="Protocol review is not locked"
+            )
+        )
+    if not admission_ready:
+        blockers.append(
+            LaunchGateBlocker(
+                code="protocol_admission_failed",
+                message="Frozen protocol, dataset, or fixture admission checks failed",
             )
         )
     if not requested:
@@ -277,10 +307,61 @@ def evaluate_launch_gate(
                     message="Authorized provider and model do not match the target binding",
                 )
             )
+        if not budget_ok:
+            blockers.append(
+                LaunchGateBlocker(
+                    code="authorized_budget_mismatch",
+                    message=(
+                        "Authorization currency and maximum spend must exactly match "
+                        "the frozen protocol monetary budget"
+                    ),
+                )
+            )
 
-    ready = not blockers
+    if not pricing_snapshot_valid:
+        blockers.append(
+            LaunchGateBlocker(
+                code="pricing_snapshot_unverified",
+                message=(
+                    "A fresh, hash-pinned pricing snapshot matching every provider role "
+                    "and the protocol budget is required"
+                ),
+            )
+        )
+    if not provider_configuration_valid:
+        blockers.append(
+            LaunchGateBlocker(
+                code="provider_configuration_unavailable",
+                message=(
+                    "Runtime HTTPS provider credentials and provider/model identity must "
+                    "match every frozen role"
+                ),
+            )
+        )
+
+    technical_blocker_codes = {
+        "protocol_not_locked",
+        "protocol_admission_failed",
+        "fixture_set_empty",
+        "fixtures_not_live_eligible",
+        "pricing_snapshot_unverified",
+        "provider_configuration_unavailable",
+    }
+    technical_ready = not any(
+        blocker.code in technical_blocker_codes for blocker in blockers
+    )
+    blockers.append(
+        LaunchGateBlocker(
+            code="human_admission_unverified",
+            message=(
+                "A separate human-controlled admission step must verify authorization "
+                "authenticity and consent before live execution"
+            ),
+        )
+    )
     return LaunchGateReport(
         protocol_locked=protocol_locked,
+        admission_ready=admission_ready,
         fixtures_live_eligible=fixtures_ok,
         fixture_ids=requested,
         authorization_present=authorization_present,
@@ -288,7 +369,11 @@ def evaluate_launch_gate(
         provider_authorized=provider_ok,
         spending_authorized=spending_ok,
         provider_model_authorized=provider_model_ok,
-        ready=ready,
+        budget_authorized=budget_ok,
+        pricing_snapshot_valid=pricing_snapshot_valid,
+        provider_configuration_valid=provider_configuration_valid,
+        technical_ready=technical_ready,
+        ready=False,
         blockers=tuple(blockers),
         software_verification_limit=_SOFTWARE_LIMIT,
     )

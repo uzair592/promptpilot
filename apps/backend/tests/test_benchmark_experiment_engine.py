@@ -455,7 +455,7 @@ def test_authorization_document_is_malformed_when_absent() -> None:
     assert caught.value.code == "authorization_invalid"
 
 
-def test_launch_gate_passes_only_with_complete_external_authorization() -> None:
+def test_launch_gate_reports_technical_readiness_but_never_authorizes_live_execution() -> None:
     report = evaluate_launch_gate(
         protocol_locked=True,
         fixture_ids=("fixture-a",),
@@ -464,8 +464,15 @@ def test_launch_gate_passes_only_with_complete_external_authorization() -> None:
         authorization=_authorization(),
         target_provider="offline-test",
         target_model="offline-model",
+        pricing_snapshot_valid=True,
+        budget_currency="USD",
+        budget_maximum_cost=10.0,
+        provider_configuration_valid=True,
+        admission_ready=True,
     )
-    assert report.ready is True and report.admitted is True
+    assert report.technical_ready is True
+    assert report.ready is False and report.admitted is False
+    assert "human_admission_unverified" in {item.code for item in report.blockers}
     assert "cannot" not in report.software_verification_limit or "unverified" in (
         report.software_verification_limit
     )
@@ -509,3 +516,65 @@ def test_launch_gate_reports_empty_fixture_set() -> None:
     )
     assert "fixture_set_empty" in {item.code for item in report.blockers}
     assert isinstance(report.blockers[0], LaunchGateBlocker)
+
+
+def test_launch_gate_fails_closed_without_a_verified_pricing_snapshot() -> None:
+    report = evaluate_launch_gate(
+        protocol_locked=True,
+        fixture_ids=("fixture-a",),
+        live_eligible_fixture_ids=("fixture-a",),
+        protocol_sha256=PROTOCOL_SHA,
+        authorization=_authorization(),
+        target_provider="offline-test",
+        target_model="offline-model",
+    )
+
+    assert report.ready is False
+    assert report.pricing_snapshot_valid is False
+    assert "pricing_snapshot_unverified" in {item.code for item in report.blockers}
+
+
+def test_launch_gate_requires_authorized_budget_to_match_protocol() -> None:
+    report = evaluate_launch_gate(
+        protocol_locked=True,
+        fixture_ids=("fixture-a",),
+        live_eligible_fixture_ids=("fixture-a",),
+        protocol_sha256=PROTOCOL_SHA,
+        authorization=_authorization(),
+        target_provider="offline-test",
+        target_model="offline-model",
+        pricing_snapshot_valid=True,
+        budget_currency="EUR",
+        budget_maximum_cost=10.0,
+        admission_ready=True,
+    )
+
+    assert report.ready is False
+    assert report.budget_authorized is False
+    assert "authorized_budget_mismatch" in {item.code for item in report.blockers}
+
+
+def test_launch_gate_authorization_must_cover_every_provider_role() -> None:
+    report = evaluate_launch_gate(
+        protocol_locked=True,
+        fixture_ids=("fixture-a",),
+        live_eligible_fixture_ids=("fixture-a",),
+        protocol_sha256=PROTOCOL_SHA,
+        authorization=_authorization(),
+        target_provider="offline-test",
+        target_model="offline-model",
+        pricing_snapshot_valid=True,
+        budget_currency="USD",
+        budget_maximum_cost=10.0,
+        admission_ready=True,
+        required_provider_assignments=(
+            ("offline-test", "offline-model"),
+            ("different-provider", "different-model"),
+        ),
+    )
+
+    assert report.ready is False
+    assert report.provider_model_authorized is False
+    assert "authorized_provider_mismatch" in {
+        item.code for item in report.blockers
+    }

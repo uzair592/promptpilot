@@ -40,6 +40,8 @@ from .benchmark_fixtures import (
     load_fixture_manifest,
     manifest_sha256,
 )
+from .benchmark_pricing import PricingSnapshotError, load_pricing_snapshot
+from .benchmark_provider_adapter import live_provider_configuration_matches
 from .db import SessionLocal
 from .production_benchmark_protocol import (
     LiveStudyProtocol,
@@ -225,6 +227,14 @@ def cmd_launch_gate(args: argparse.Namespace) -> int:
             auth = parse_authorization(json.loads(Path(args.authorization).read_text()))
         else:
             auth = None
+        pricing_snapshot_valid = False
+        pricing_error: str | None = None
+        if args.pricing_snapshot:
+            try:
+                load_pricing_snapshot(args.pricing_snapshot, protocol)
+                pricing_snapshot_valid = True
+            except PricingSnapshotError as error:
+                pricing_error = error.code
 
         # Check admission before reporting launch readiness.
         admission = admit_protocol(protocol, dataset, protocol_path)
@@ -235,7 +245,6 @@ def cmd_launch_gate(args: argparse.Namespace) -> int:
                     f"  {admission_blocker.code}: {admission_blocker.message}",
                     file=sys.stderr,
                 )
-            return 1
         manifests = load_manifests(protocol, protocol_path.parent, dataset)
 
         fixture_ids = list(manifests.keys())
@@ -250,16 +259,53 @@ def cmd_launch_gate(args: argparse.Namespace) -> int:
             authorization=auth,
             target_provider=protocol.providers.baseline_target.provider,
             target_model=protocol.providers.baseline_target.model,
+            pricing_snapshot_valid=pricing_snapshot_valid,
+            budget_currency=(
+                protocol.monetary_budget.currency
+                if protocol.monetary_budget is not None
+                else None
+            ),
+            budget_maximum_cost=(
+                protocol.monetary_budget.maximum_cost
+                if protocol.monetary_budget is not None
+                else None
+            ),
+            required_provider_assignments=tuple(
+                (assignment.provider, assignment.model)
+                for assignment in (
+                    protocol.providers.analysis,
+                    protocol.providers.question_generation,
+                    protocol.providers.prompt_generation,
+                    protocol.providers.baseline_target,
+                    *(
+                        (protocol.providers.judge,)
+                        if protocol.providers.judge is not None
+                        else ()
+                    ),
+                )
+            ),
+            provider_configuration_valid=live_provider_configuration_matches(protocol),
+            admission_ready=admission.ready,
         )
 
         print("=== Launch Gate Report ===")
-        print(f"Ready: {launch_report.ready}")
+        print(f"Technical Ready: {launch_report.technical_ready}")
+        print(f"Live Execution Ready: {launch_report.ready}")
         print(f"Protocol Locked: {launch_report.protocol_locked}")
+        print(f"Admission Ready: {launch_report.admission_ready}")
         print(f"Fixtures Live Eligible: {launch_report.fixtures_live_eligible}")
         print(f"Authorization Present: {launch_report.authorization_present}")
         print(f"Provider Authorized: {launch_report.provider_authorized}")
         print(f"Spending Authorized: {launch_report.spending_authorized}")
+        print(f"Budget Authorized: {launch_report.budget_authorized}")
         print(f"Provider/Model Authorized: {launch_report.provider_model_authorized}")
+        print(f"Pricing Snapshot Valid: {launch_report.pricing_snapshot_valid}")
+        print(
+            "Runtime Provider Configuration Valid: "
+            f"{launch_report.provider_configuration_valid}"
+        )
+        if pricing_error is not None:
+            print(f"Pricing Snapshot Error: {pricing_error}")
 
         if launch_report.blockers:
             print("Blockers:")
@@ -268,7 +314,7 @@ def cmd_launch_gate(args: argparse.Namespace) -> int:
 
         print(f"\nSoftware Limitation: {launch_report.software_verification_limit}")
 
-        return 0 if launch_report.ready else 1
+        return 0 if admission.ready and launch_report.ready else 1
     except Exception as e:
         print(f"Launch gate evaluation failed: {e}", file=sys.stderr)
         return 1
@@ -304,6 +350,7 @@ Examples:
   python -m promptpilot_backend.benchmark_live_runner_cli launch-gate \\
     --protocol fixtures/production_pipeline/synthetic_protocol.json \\
     --dataset benchmark_dataset.json \\
+    --pricing-snapshot pricing-snapshot.json \\
     --authorization auth.json
         """,
     )
@@ -341,6 +388,10 @@ Examples:
     launch_gate_parser.add_argument("--protocol", required=True, help="Path to protocol JSON")
     launch_gate_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
     launch_gate_parser.add_argument("--authorization", help="Path to authorization JSON")
+    launch_gate_parser.add_argument(
+        "--pricing-snapshot",
+        help="Path to the offline, hash-pinned provider pricing snapshot JSON",
+    )
     launch_gate_parser.set_defaults(func=cmd_launch_gate)
 
     args = parser.parse_args()

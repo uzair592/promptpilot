@@ -43,6 +43,7 @@ from .benchmark_experiment_binding import (
     assert_fixture_current,
 )
 from .benchmark_fixtures import FixtureManifest
+from .benchmark_pricing import CostEstimate
 from .llm_provider import OpenAICompatibleProvider
 from .models import BenchmarkExperimentRun
 
@@ -195,18 +196,31 @@ class ProviderCallExecutor:
                     "Budgeted calls require a pre-call cost estimate",
                 )
             # Budgeted calls require an adapter-provided pre-call upper bound.
-            estimated_cost = estimate_cost(request_payload)
-            if estimated_cost is None:
+            estimate = estimate_cost(request_payload)
+            if estimate is None:
                 raise ExecutionGateError(
                     "cost_estimate_unavailable",
                     "Budgeted calls require a pre-call cost estimate",
                 )
-            currency = run.budget_currency
-            if currency is None:
+            try:
+                checked_estimate = CostEstimate.model_validate(estimate)
+            except (TypeError, ValueError) as error:
+                raise ExecutionGateError(
+                    "cost_estimate_invalid",
+                    "Pre-call estimate must be a finite positive amount with a currency",
+                ) from error
+            if run.budget_currency is None:
                 raise ExecutionGateError(
                     "budget_currency_unavailable",
                     "Budgeted calls require a configured currency",
                 )
+            if checked_estimate.currency != run.budget_currency:
+                raise ExecutionGateError(
+                    "currency_mismatch",
+                    "Pre-call estimate currency differs from the run budget currency",
+                )
+            estimated_cost = checked_estimate.amount
+            currency = checked_estimate.currency
         request_sha256 = canonical_artifact_sha256(request_payload)
         parameter_sha256 = (
             self._binding.target_parameters.generation_parameter_sha256

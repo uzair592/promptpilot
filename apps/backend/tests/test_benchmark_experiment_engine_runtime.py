@@ -43,6 +43,7 @@ from promptpilot_backend.benchmark_experiment_results import (
     lock_export,
     write_export,
 )
+from promptpilot_backend.benchmark_pricing import CostEstimate
 from promptpilot_backend.db import SessionLocal
 from promptpilot_backend.models import (
     BenchmarkExperimentRun,
@@ -232,8 +233,8 @@ def test_budgeted_executor_reserves_and_settles_pre_call_estimate(experiment_env
         db.commit()
 
     class CostedOfflineProvider(OfflineProvider):
-        def estimate_cost(self, request_payload: object) -> float:
-            return 0.2
+        def estimate_cost(self, request_payload: object) -> CostEstimate:
+            return CostEstimate(amount=0.2, currency="USD")
 
     provider = CostedOfflineProvider()
     executor = make_executor(experiment_env)
@@ -261,6 +262,173 @@ def test_budgeted_executor_reserves_and_settles_pre_call_estimate(experiment_env
     assert run is not None and run.reserved_spend == 0
     assert snapshot.spent_amount == pytest.approx(0.2)
     assert snapshot.remaining_spend == pytest.approx(0.8)
+
+
+@pytest.mark.parametrize(
+    "estimate",
+    [
+        None,
+        {"amount": 0.0, "currency": "USD"},
+        {"amount": -0.1, "currency": "USD"},
+        {"amount": float("nan"), "currency": "USD"},
+        {"amount": float("inf"), "currency": "USD"},
+        {"amount": float("-inf"), "currency": "USD"},
+    ],
+)
+def test_invalid_pre_call_estimates_never_invoke_provider(experiment_env, estimate) -> None:
+    run_id = experiment_env.run_id
+    with SessionLocal() as db:
+        db.execute(
+            update(BenchmarkExperimentRun)
+            .where(BenchmarkExperimentRun.id == run_id)
+            .values(max_spend=1.0, budget_currency="USD", spent_currency="USD")
+        )
+        db.commit()
+
+    class InvalidCostProvider(OfflineProvider):
+        def estimate_cost(self, request_payload: object) -> object:
+            return estimate
+
+    provider = InvalidCostProvider()
+    executor = make_executor(experiment_env)
+    with pytest.raises((ExecutionGateError, ValueError)):
+        executor.execute(
+            provider=provider,
+            role="analysis",
+            stable_unit_id="task#r1",
+            task_id="planning-launch-001",
+            fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+            repetition=1,
+            provider_name="offline-test",
+            model_name="analysis-test-model",
+            request_payload={"p": 1},
+            invoke=provider.invoke,
+            stable_token=f"invalid-estimate-{estimate}",
+        )
+    assert provider.calls == 0
+    _assert_no_attempts(run_id)
+
+
+def test_estimate_currency_mismatch_never_reserves_or_invokes(experiment_env) -> None:
+    run_id = experiment_env.run_id
+    with SessionLocal() as db:
+        db.execute(
+            update(BenchmarkExperimentRun)
+            .where(BenchmarkExperimentRun.id == run_id)
+            .values(max_spend=1.0, budget_currency="USD", spent_currency="USD")
+        )
+        db.commit()
+
+    class WrongCurrencyProvider(OfflineProvider):
+        def estimate_cost(self, request_payload: object) -> CostEstimate:
+            return CostEstimate(amount=0.2, currency="EUR")
+
+    provider = WrongCurrencyProvider()
+    executor = make_executor(experiment_env)
+    with pytest.raises(ExecutionGateError) as caught:
+        executor.execute(
+            provider=provider,
+            role="analysis",
+            stable_unit_id="task#r1",
+            task_id="planning-launch-001",
+            fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+            repetition=1,
+            provider_name="offline-test",
+            model_name="analysis-test-model",
+            request_payload={"p": 1},
+            invoke=provider.invoke,
+            stable_token="estimate-currency-mismatch",
+        )
+    assert caught.value.code == "currency_mismatch"
+    assert provider.calls == 0
+    _assert_no_attempts(run_id)
+
+
+def test_insufficient_budget_rejects_before_provider_invocation(experiment_env) -> None:
+    run_id = experiment_env.run_id
+    with SessionLocal() as db:
+        db.execute(
+            update(BenchmarkExperimentRun)
+            .where(BenchmarkExperimentRun.id == run_id)
+            .values(max_spend=0.1, budget_currency="USD", spent_currency="USD")
+        )
+        db.commit()
+
+    class CostedOfflineProvider(OfflineProvider):
+        def estimate_cost(self, request_payload: object) -> CostEstimate:
+            return CostEstimate(amount=0.2, currency="USD")
+
+    provider = CostedOfflineProvider()
+    executor = make_executor(experiment_env)
+    with pytest.raises(LedgerError) as caught:
+        executor.execute(
+            provider=provider,
+            role="analysis",
+            stable_unit_id="task#r1",
+            task_id="planning-launch-001",
+            fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+            repetition=1,
+            provider_name="offline-test",
+            model_name="analysis-test-model",
+            request_payload={"p": 1},
+            invoke=provider.invoke,
+            stable_token="insufficient-budget",
+        )
+    assert caught.value.code == "monetary_budget_exhausted"
+    assert provider.calls == 0
+    _assert_no_attempts(run_id)
+
+
+def test_exact_budget_boundary_reserves_invokes_and_settles(experiment_env) -> None:
+    run_id = experiment_env.run_id
+    with SessionLocal() as db:
+        db.execute(
+            update(BenchmarkExperimentRun)
+            .where(BenchmarkExperimentRun.id == run_id)
+            .values(max_spend=0.2, budget_currency="USD", spent_currency="USD")
+        )
+        db.commit()
+
+    class CostedOfflineProvider(OfflineProvider):
+        def estimate_cost(self, request_payload: object) -> CostEstimate:
+            return CostEstimate(amount=0.2, currency="USD")
+
+        def invoke(self) -> object:
+            with SessionLocal() as db:
+                snapshot = BenchmarkCallLedger.budget_snapshot(db, run_id)
+                run = db.get(BenchmarkExperimentRun, run_id)
+                assert snapshot.spent_amount == pytest.approx(0)
+                assert snapshot.remaining_spend == pytest.approx(0)
+                assert run is not None and run.reserved_spend == pytest.approx(0.2)
+            return super().invoke()
+
+    provider = CostedOfflineProvider()
+    executor = make_executor(experiment_env)
+    call = executor.execute(
+        provider=provider,
+        role="analysis",
+        stable_unit_id="task#r1",
+        task_id="planning-launch-001",
+        fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+        repetition=1,
+        provider_name="offline-test",
+        model_name="analysis-test-model",
+        request_payload={"p": 1},
+        invoke=provider.invoke,
+        stable_token="exact-budget-boundary",
+    )
+
+    assert call.status == "succeeded"
+    assert provider.calls == 1
+    with SessionLocal() as db:
+        snapshot = BenchmarkCallLedger.budget_snapshot(db, run_id)
+        attempt = db.get(BenchmarkProviderCallAttempt, call.attempt_id)
+        run = db.get(BenchmarkExperimentRun, run_id)
+    assert attempt is not None and attempt.cost_estimate == pytest.approx(0.2)
+    assert attempt.currency == "USD"
+    assert run is not None and run.reserved_spend == pytest.approx(0)
+    assert snapshot.spent_amount == pytest.approx(0.2)
+    assert snapshot.remaining_spend == pytest.approx(0)
 
 
 def test_executor_marks_provider_failure_without_retry(experiment_env) -> None:

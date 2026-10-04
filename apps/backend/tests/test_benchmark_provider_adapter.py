@@ -1,9 +1,13 @@
 """Safety tests for provider adapter boundary."""
 
+import json
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
+from promptpilot_backend.benchmark_pricing import PricingModel, ProviderPricingSnapshot
 from promptpilot_backend.benchmark_provider_adapter import (
     AdapterConfigurationError,
     LiveProviderAdapter,
@@ -11,6 +15,27 @@ from promptpilot_backend.benchmark_provider_adapter import (
     ProviderAdapterFactory,
     ProviderNotAvailableError,
 )
+
+
+def _snapshot(provider: str, model: str) -> ProviderPricingSnapshot:
+    now = datetime.now(UTC)
+    return ProviderPricingSnapshot(
+        schema_version="v1",
+        source_reference="https://pricing.example.org/frozen-snapshot",
+        captured_at=now - timedelta(minutes=1),
+        valid_until=now + timedelta(days=1),
+        currency="USD",
+        pricing_basis="all_in_token_rates",
+        models=(
+            PricingModel(
+                provider=provider,
+                model=model,
+                input_cost_per_million_tokens=Decimal("1"),
+                output_cost_per_million_tokens=Decimal("1"),
+                maximum_context_tokens=1000,
+            ),
+        ),
+    )
 
 
 def test_offline_provider_adapter_is_offline():
@@ -51,6 +76,7 @@ def test_live_provider_adapter_is_implemented():
         role="target_execution",
         provider_name="openrouter",
         model_name="gpt-4",
+        pricing_snapshot=_snapshot("openrouter", "gpt-4"),
     )
     assert adapter.is_offline is False
     assert adapter.provider_name == "openrouter"
@@ -65,6 +91,7 @@ def test_live_provider_adapter_rejects_provider_or_model_drift():
             role="target_execution",
             provider_name="openrouter",
             model_name="gpt-4",
+            pricing_snapshot=_snapshot("openrouter", "gpt-4"),
         )
     with pytest.raises(AdapterConfigurationError, match="model"):
         LiveProviderAdapter(
@@ -72,6 +99,7 @@ def test_live_provider_adapter_rejects_provider_or_model_drift():
             role="target_execution",
             provider_name="openrouter",
             model_name="gpt-4",
+            pricing_snapshot=_snapshot("openrouter", "gpt-4"),
         )
 
 
@@ -82,27 +110,70 @@ def test_provider_adapter_factory_offline_mode():
     assert adapter.is_offline is True
 
 
-def test_provider_adapter_factory_live_mode_creates_matching_live_adapter(monkeypatch):
-    monkeypatch.setattr(
-        "promptpilot_backend.llm_provider.OpenAICompatibleProvider",
-        lambda: SimpleNamespace(name="openrouter", model="gpt-4"),
-    )
-    factory = ProviderAdapterFactory("live")
-    adapter = factory.create_adapter("analysis", "openrouter", "gpt-4")
-    # In live mode, factory creates a LiveProviderAdapter
-    assert not adapter.is_offline
-    assert adapter.provider_name == "openrouter"
-    assert adapter.model_name == "gpt-4"
+def test_provider_adapter_factory_rejects_live_mode_without_pinned_pricing():
+    with pytest.raises(AdapterConfigurationError, match="pinned pricing"):
+        ProviderAdapterFactory("live")
 
 
-def test_provider_adapter_factory_rejects_frozen_model_mismatch(monkeypatch):
+def test_openai_compatible_provider_uses_runtime_credentials_without_network(
+    monkeypatch,
+) -> None:
+    secret = "runtime-only-test-credential"
+    captured: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "task_category": "general",
+                                        "dimensions": {},
+                                        "information_gaps": [],
+                                    }
+                                )
+                            }
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+
+    def intercepted_urlopen(request, timeout):
+        captured["authorization"] = request.get_header("Authorization")
+        captured["body"] = request.data
+        return Response()
+
     monkeypatch.setattr(
-        "promptpilot_backend.llm_provider.OpenAICompatibleProvider",
-        lambda: SimpleNamespace(name="openrouter", model="gpt-4"),
+        "promptpilot_backend.llm_provider.get_settings",
+        lambda: SimpleNamespace(
+            llm_provider="openrouter",
+            llm_base_url="https://provider.example",
+            llm_model="runtime-model",
+            llm_api_key=secret,
+            llm_timeout=1,
+        ),
     )
-    factory = ProviderAdapterFactory("live")
-    with pytest.raises(AdapterConfigurationError, match="frozen provider assignment"):
-        factory.create_adapter("target_execution", "openrouter", "different-model")
+    monkeypatch.setattr("promptpilot_backend.llm_provider.urlopen", intercepted_urlopen)
+
+    from promptpilot_backend.llm_provider import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider()
+    result = provider.analyze("offline unit-test task")
+
+    assert provider.name == "openrouter"
+    assert provider.model == "runtime-model"
+    assert result.task_category == "general"
+    assert captured["authorization"] == f"Bearer {secret}"
+    assert secret.encode() not in captured["body"]
 
 
 def test_provider_adapter_factory_invalid_mode():
