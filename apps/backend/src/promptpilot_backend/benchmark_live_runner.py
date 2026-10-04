@@ -199,12 +199,14 @@ class LedgerGate:
         self,
         *,
         executor: ProviderCallExecutor,
+        stop_evaluator: StopRuleEvaluator,
         unit_id: str,
         task_id: str,
         fixture_id: str,
         repetition: int,
     ) -> None:
         self._executor = executor
+        self._stop_evaluator = stop_evaluator
         self._unit_id = unit_id
         self._task_id = task_id
         self._fixture_id = fixture_id
@@ -253,6 +255,15 @@ class LedgerGate:
         self._records.append(
             _LedgerCallRecord(call=call, provider=provider_name, model=model_name)
         )
+        provider_stop = self._stop_evaluator.evaluate_after_provider_call(
+            call_result=call,
+            role=role,
+        )
+        if provider_stop.should_stop:
+            raise ProviderUnavailable(
+                f"Ledger-gated {role} provider call was stopped by a "
+                f"frozen-protocol stop rule: {provider_stop.reason_code}"
+            )
         if call.status != "succeeded":
             raise ProviderUnavailable(f"Ledger-gated {role} provider call failed")
         if not captured:
@@ -476,6 +487,7 @@ class LiveExperimentRunner:
         self._fixture_manifests = fixture_manifests
         self._adapter_factory = adapter_factory
         self._execution_mode = execution_mode
+        self._launch_gate_report = launch_gate_report
         self._executor = ProviderCallExecutor(
             db=db,
             run_id=run_id,
@@ -499,6 +511,9 @@ class LiveExperimentRunner:
                     manifest_path=manifest_path,
                 )
                 units.append(unit)
+                completeness = self._stop_evaluator.evaluate_pair_completeness(unit)
+                if completeness.should_stop:
+                    return units
                 if unit.disposition != "complete_pair":
                     return units
         return units
@@ -526,6 +541,7 @@ class LiveExperimentRunner:
         )
         gate = LedgerGate(
             executor=self._executor,
+            stop_evaluator=self._stop_evaluator,
             unit_id=unit_id,
             task_id=task_id,
             fixture_id=fixture_id,
@@ -649,6 +665,48 @@ class LiveExperimentRunner:
             original_task=original_task,
         )
 
+    def _assert_target_execution_allowed(
+        self,
+        context: UnitExecutionContext,
+    ) -> None:
+        """Apply every frozen stop rule immediately before a target call.
+
+        This is the live-execution stop boundary: protocol drift, fixture
+        drift, fixture live-eligibility, target-parameter identity, the
+        frozen condition order, target provider/model identity, and both
+        the call and monetary budgets are re-verified here, so a unit can
+        never reach the target provider once any frozen invariant has
+        changed since staging.
+        """
+
+        decision = self._stop_evaluator.evaluate_before_target_execution(
+            unit_id=context.unit_id,
+            task_id=context.task_id,
+            fixture_id=context.fixture_id,
+            repetition=context.repetition,
+            condition_order=tuple(context.condition_order),
+            target_provider=self._binding.target_provider,
+            target_model=self._binding.target_model,
+            target_parameters=self._target_parameters(),
+            fixture_manifest=context.manifest,
+            dataset=self._dataset,
+            manifest_path=context.manifest_path,
+            protocol=self._protocol,
+            budget_snapshot=BenchmarkCallLedger.budget_snapshot(
+                self._db, self._run_id
+            ),
+            launch_gate_passed=(
+                self._launch_gate_report is not None
+                and self._launch_gate_report.ready
+            ),
+        )
+        if decision.should_stop:
+            raise PartialExperimentUnit(
+                decision.reason_code.value
+                if decision.reason_code is not None
+                else "stop_rule_violation"
+            )
+
     def _run_baseline(
         self,
         context: UnitExecutionContext,
@@ -666,6 +724,7 @@ class LiveExperimentRunner:
             manifest_path=context.manifest_path,
             execution_mode=self._execution_mode,
         )
+        self._assert_target_execution_allowed(context)
         assert_baseline_prompt(apparatus.original_task, apparatus.original_task)
         target_adapter = self._adapter_factory.create_adapter(
             role="target_execution",
@@ -991,6 +1050,7 @@ class LiveExperimentRunner:
         )
 
         # Target execution with the optimized prompt.
+        self._assert_target_execution_allowed(context)
         target_adapter = self._adapter_factory.create_adapter(
             role="target_execution",
             provider=self._protocol.providers.baseline_target.provider,
@@ -1138,6 +1198,17 @@ class LiveExperimentRunner:
                 *([task.reference] if task.reference else []),
             ],
         )
+        judge_stop = self._stop_evaluator.evaluate_judge_result(
+            judge_result=evaluation,
+            evaluation_method=self._binding.evaluation_primary,
+        )
+        if judge_stop.should_stop:
+            raise UnitExecutionError(
+                judge_stop.reason_code.value
+                if judge_stop.reason_code is not None
+                else "judge_failure",
+                judge_stop.reason_message or "Judge evaluation was rejected",
+            )
         dimension_scores: dict[str, dict[str, float | None]] = {}
         for label in ("baseline", "promptpilot"):
             dimension_scores[label] = {

@@ -1,13 +1,19 @@
 """Safe live-runner CLI for the guarded production benchmark.
 
-This CLI provides safe operations for the live runner:
+This CLI provides safe operations for the guarded live runner:
 - validate: Validate a protocol and admission
 - dry-run: Simulate the full 168-call workload
 - stage: Stage an experiment run (requires admission)
 - inspect: Inspect a staged run's budget and status
+- launch-gate: Evaluate the fail-closed launch gate
 
-The live-run operation is NOT exposed via this CLI - it requires the
-full launch gate which is not accessible from the CLI in this milestone.
+The live-run operation is deliberately NOT exposed via this CLI. Live
+execution requires a launch-gate report carrying ``ready = true``,
+which the software never produces: ``evaluate_launch_gate`` always
+reports ``ready = false`` because software cannot verify human
+authorization. A live run can therefore only be started by a
+human-controlled process that has completed the out-of-band
+admission, never from this CLI.
 """
 
 from __future__ import annotations

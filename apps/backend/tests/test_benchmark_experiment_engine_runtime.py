@@ -85,6 +85,32 @@ def make_executor(env) -> ProviderCallExecutor:
     return ProviderCallExecutor(SessionLocal(), env.run_id, env.binding)
 
 
+def ready_launch_gate() -> SimpleNamespace:
+    """An internally consistent launch-gate report claiming readiness.
+
+    Every frozen condition flag must be satisfied for the provider
+    executor to accept the report, so a live-mode test that needs to
+    pass the gate supplies all of them explicitly.
+    """
+
+    return SimpleNamespace(
+        ready=True,
+        blockers=[],
+        protocol_locked=True,
+        admission_ready=True,
+        fixtures_live_eligible=True,
+        authorization_present=True,
+        authorization_binds_protocol=True,
+        provider_authorized=True,
+        spending_authorized=True,
+        provider_model_authorized=True,
+        budget_authorized=True,
+        pricing_snapshot_valid=True,
+        provider_configuration_valid=True,
+        technical_ready=True,
+    )
+
+
 # --------------------------------------------------------------------------
 # Provider-call execution gate
 # --------------------------------------------------------------------------
@@ -127,7 +153,7 @@ def test_executor_rejects_offline_fixture_provider_in_live_mode(experiment_env) 
         UUID(int=0),
         experiment_env.binding,
         execution_mode="live",
-        launch_gate_report=SimpleNamespace(ready=True, blockers=[]),
+        launch_gate_report=ready_launch_gate(),
     )
 
     with pytest.raises(ExecutionGateError) as caught:
@@ -176,7 +202,7 @@ def test_budgeted_live_call_fails_before_invoke_without_cost_estimate(experiment
         run_id,
         experiment_env.binding,
         execution_mode="live",
-        launch_gate_report=SimpleNamespace(ready=True, blockers=[]),
+        launch_gate_report=ready_launch_gate(),
     )
 
     with pytest.raises(ExecutionGateError) as caught:

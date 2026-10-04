@@ -38,6 +38,11 @@ from .production_benchmark_protocol import (
 
 ConditionOrder = Literal["alternating_paired"]
 
+# The execution mode a binding may represent. A binding is staged
+# offline by default; a live run reuses the same binding under the
+# explicitly authorized ``live`` execution mode.
+BindingExecutionMode = Literal["offline_dry_run", "live"]
+
 
 class BindingError(ValueError):
     def __init__(self, code: str, message: str) -> None:
@@ -103,7 +108,7 @@ class ProtocolBinding(StrictBindingModel):
     target_parameters: TargetParameterBinding
     call_ceiling: CallCeiling
     analysis_stratum: str
-    execution_mode: Literal["offline_dry_run"]
+    execution_mode: BindingExecutionMode
 
     @model_validator(mode="after")
     def fixture_ids_unique(self) -> ProtocolBinding:
@@ -154,7 +159,7 @@ def bind_protocol(
     dataset: BenchmarkDataset,
     fixture_manifests: Sequence[tuple[FixtureManifest, Path]],
     *,
-    execution_mode: Literal["offline_dry_run"] = "offline_dry_run",
+    execution_mode: BindingExecutionMode = "offline_dry_run",
 ) -> ProtocolBinding:
     """Pin a protocol/dataset/fixture set into an immutable binding."""
 

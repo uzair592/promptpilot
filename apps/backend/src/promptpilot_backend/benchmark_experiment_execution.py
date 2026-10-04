@@ -1,6 +1,6 @@
 """Ledger-gated provider-call execution for benchmark experiment runs.
 
-Every provider-backed stage in a future live run must pass through
+Every provider-backed stage in a live run must pass through
 :class:`ProviderCallExecutor`. The authoritative sequence is::
 
     reserve_call
@@ -13,12 +13,13 @@ attempt has been transitioned to ``started``. Budget cannot be exceeded and no
 call can disappear from the ledger, because the role counter is consumed at
 reservation time and the outcome is always settled explicitly.
 
-This milestone exposes two execution modes:
+This module exposes two execution modes:
 - ``offline_dry_run``: Admits only providers explicitly marked ``offline_fixture = True``.
 - ``live``: Requires ALL launch gate conditions to pass (protocol locked, fixtures
   live-eligible, launch authorization supplied, provider/spending authorized, etc.).
-  The live mode is unrepresentable without a valid launch gate - it is
-  fail-closed by design.
+  The live mode is fail-closed by design: a launch-gate report is accepted only
+  when it is internally consistent, so no single condition can be unsatisfied
+  while the report still claims readiness.
 """
 
 from __future__ import annotations
@@ -50,6 +51,24 @@ from .models import BenchmarkExperimentRun
 # Execution modes. "live" is only usable when the launch gate passes.
 ExecutionMode = Literal["offline_dry_run", "live"]
 EXECUTION_MODES: tuple[ExecutionMode, ...] = ("offline_dry_run", "live")
+
+# Every frozen condition a launch-gate report must record as satisfied
+# before it may claim readiness. The provider path re-verifies these
+# flags so an internally inconsistent report cannot reach a provider.
+_LAUNCH_GATE_CONDITION_FLAGS: tuple[str, ...] = (
+    "protocol_locked",
+    "admission_ready",
+    "fixtures_live_eligible",
+    "authorization_present",
+    "authorization_binds_protocol",
+    "provider_authorized",
+    "spending_authorized",
+    "provider_model_authorized",
+    "budget_authorized",
+    "pricing_snapshot_valid",
+    "provider_configuration_valid",
+    "technical_ready",
+)
 
 
 class ExecutionGateError(ValueError):
@@ -145,6 +164,25 @@ class ProviderCallExecutor:
                 raise ExecutionGateError(
                     "launch_gate_not_passed",
                     f"Launch gate not passed: {[b.code for b in launch_gate_report.blockers]}",
+                )
+            # A report that claims readiness must be internally consistent:
+            # every frozen launch condition it records must itself be
+            # satisfied. This prevents a hand-assembled report from
+            # asserting ``ready = true`` while any single condition is
+            # still failing, so the provider path cannot be reached
+            # through an inconsistent gate.
+            inconsistent = [
+                flag
+                for flag in _LAUNCH_GATE_CONDITION_FLAGS
+                if getattr(launch_gate_report, flag, False) is not True
+            ]
+            if inconsistent:
+                raise ExecutionGateError(
+                    "launch_gate_inconsistent",
+                    (
+                        "Launch gate report claims readiness but frozen "
+                        f"conditions are unsatisfied: {inconsistent}"
+                    ),
                 )
         self._db = db
         self._run_id = run_id

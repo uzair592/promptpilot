@@ -1,35 +1,68 @@
 # Live runner operations and launch gates — v1
 
-**Status:** DESIGN AND OPERATIONS PROCEDURE ONLY
-**This milestone does NOT enable live execution.**
+**Status:** IMPLEMENTED AND FAIL-CLOSED
 **External human approval verified:** `false`
 **Live study status:** NOT ADMITTED FOR LIVE STUDY
+**Live experiment run:** NONE — no live provider call has ever been made
+**Valid benchmark result:** NONE — no valid benchmark result exists yet
 
-This document describes the future procedure for running the controlled
-`production_pipeline_paired_v1` experiment. Nothing described here is
-implemented as an executable live path in this milestone.
+This document describes the guarded live runner that exists in the
+`feat/guarded-live-runner` branch. The live **infrastructure** is
+implemented in code, but live **execution** remains fail-closed: the
+software can never authorize a live run, and no live experiment has
+been run.
 
-## What this milestone adds
+## The three facts that must stay separate
+
+1. **Live infrastructure exists in code.** `ExecutionMode` has two
+   members, `offline_dry_run` and `live`. `LiveExperimentRunner`,
+   `ProviderCallExecutor`, `LiveProviderAdapter`, and the
+   `ProviderAdapterFactory` live mode are all implemented.
+2. **Live execution is still fail-closed.** Every live path requires a
+   launch-gate report carrying `ready = true`. The software never
+   produces one: `evaluate_launch_gate` always reports
+   `ready = false`, because software cannot verify human
+   authorization. A `ready = true` report can only be supplied by a
+   human-controlled process that has completed the out-of-band
+   admission.
+3. **Live execution is not authorized merely because the software
+   exists.** Passing tests, a staged run, or a technically-ready
+   report are not authorization. The real production experiment
+   remains unauthorized until the genuine human-controlled
+   prerequisites below are completed.
+
+## What the implementation provides
 
 | Component | File | Purpose |
 |---|---|---|
 | Launch authorization boundary | `benchmark_experiment_authorization.py` | Models an externally issued authorization claim and a fail-closed launch gate. Never manufactures approval. |
 | Protocol/fixture binding | `benchmark_experiment_binding.py` | Pins a run to the exact protocol, dataset, fixture hashes, and target parameters it was admitted against. |
-| Provider-call execution gate | `benchmark_experiment_execution.py` | Forces every provider-backed stage through `reserve_call -> mark_started -> provider invocation -> mark_succeeded/mark_failed`. Offline dry-run mode only. |
+| Provider-call execution gate | `benchmark_experiment_execution.py` | Forces every provider-backed stage through `reserve_call -> mark_started -> provider invocation -> mark_succeeded/mark_failed`. |
+| Stop-rule evaluator | `benchmark_stop_rules.py` | Fail-closed stop rules wired into the live runner at every decision point. |
+| Guarded live runner | `benchmark_live_runner.py` | Per-unit production treatment pipeline; every provider call is ledger-gated. |
+| Provider adapter boundary | `benchmark_provider_adapter.py` | Separates offline fixture adapters from the live `OpenAICompatibleProvider` adapter. |
 | Results and export contract | `benchmark_experiment_results.py` | Immutable per-unit provenance, four explicit dispositions, score-free blinded review samples separated from human review records, export plus `ExportLock`. |
 | Analysis and dry-run planning | `benchmark_experiment_analysis.py` | Deterministic aggregation over frozen strata and the offline workload plan. |
+| Operational CLI | `benchmark_live_runner_cli.py` | `validate`, `dry-run`, `stage`, `inspect`, and `launch-gate`. No `run` command. |
 
-## What this milestone deliberately does not add
+## Execution modes
 
-* No live runner, no CLI entrypoint, no API route.
-* No real provider adapter. `OpenAICompatibleProvider` is never constructed.
-* No authorization factory. Nothing in the codebase can mint a
-  `LiveLaunchAuthorization`.
-* No environment variable or flag that enables live execution.
+### `offline_dry_run`
 
-`ExecutionMode` is a `Literal` with exactly one member, `offline_dry_run`.
-There is no `live` member, so requesting live execution is unrepresentable
-rather than merely rejected at runtime.
+Admits only providers explicitly marked `offline_fixture = True`.
+The engine rejects anything without `offline_fixture = True` and
+rejects `OpenAICompatibleProvider` by type. No network call, no
+credential read, no cost. This is the only mode the offline engine
+and the dry run use.
+
+### `live`
+
+Requires **all** launch-gate conditions to pass and a launch-gate
+report with `ready = true`. The `ProviderCallExecutor` refuses live
+execution unless the report is present, is ready, and is internally
+consistent (every frozen condition flag it records is itself
+satisfied). Offline fixture providers are rejected in live mode, so
+a synthetic fixture can never reach a live provider.
 
 ## Frozen research configuration
 
@@ -51,26 +84,28 @@ rather than merely rejected at runtime.
 
 Target generation parameters are frozen: `temperature = 0`, `top_p = 1.0`,
 `stop = []`, `presence_penalty = 0`, `frequency_penalty = 0`, `seed = null`.
+Both conditions resolve to one identical parameter set, or
+`assert_target_parameters_identical` fails.
 
 ## Still human decisions
 
-Target provider, target model, `max_tokens`, `timeout`, provider authorization,
-spending authorization, genuine fixture review and admission, and external human
-approval. Software supplies none of these and must not guess any of them.
+Target provider, target model, `max_tokens`, `timeout`, provider
+authorization, spending authorization, genuine fixture review and
+admission, and external human approval. Software supplies none of
+these and must not guess any of them.
 
-## Future launch sequence
+## Launch sequence
 
 1. **Human research decisions complete.** R, Q, skip policies, fallback
    admission, evaluator, rubric, strata, and budget are fixed and recorded.
 2. **Human-reviewed fixtures complete.** Each of the 8 tasks receives a real
    `experimental_candidate` fixture with genuine reviewer identity, review
    timestamp, and provenance/consent evidence. Synthetic fixtures are never
-   promoted.
+   promoted and are permanently not live-eligible.
 3. **Target provider and model selected.** A single provider/model binding, used
    identically by both conditions.
 4. **Target parameters frozen.** `max_tokens` and `timeout` are chosen and
-   recorded. Both conditions must resolve to one identical parameter set, or
-   `assert_target_parameters_identical` fails.
+   recorded. Both conditions must resolve to one identical parameter set.
 5. **Provider access authorized.** Confirmed with the provider owner.
 6. **Spending authorized.** A budget and currency are confirmed.
 7. **Protocol locked.** The protocol document is frozen; its hash is the study
@@ -82,15 +117,19 @@ approval. Software supplies none of these and must not guess any of them.
    issued out of band and presented to `evaluate_launch_gate`. It must bind to
    the frozen protocol hash, grant provider and spending access, cover the
    exact provider/model pair, and point at externally held evidence.
-10. **Ledger-bound experiment staged.** `BenchmarkCallLedger.stage_run` freezes
+10. **Launch gate evaluated.** `evaluate_launch_gate` reports technical
+    readiness but always `ready = false`. A human-controlled process completes
+    the admission and supplies a `ready = true` launch-gate report.
+11. **Ledger-bound experiment staged.** `BenchmarkCallLedger.stage_run` freezes
     role bindings, per-role ceilings, and the total ceiling of 168.
-11. **Controlled benchmark run.** Every provider call is reserved before it is
-    invoked. No reservation, no call.
-12. **Immutable export.** Results are exported with every unit's disposition and
+12. **Controlled benchmark run.** `LiveExperimentRunner` executes each unit.
+    Every provider call is reserved before it is invoked. No reservation, no
+    call. The stop-rule evaluator halts on any frozen-protocol violation.
+13. **Immutable export.** Results are exported with every unit's disposition and
     reason code. Unsuccessful units are retained, never deleted. `write_export`
-    refuses to overwrite an existing export, writes a companion
-    `ExportLock` record beside it, and returns that lock.
-13. **Results locked.** The companion `ExportLock` records the SHA-256 of the
+    refuses to overwrite an existing export, writes a companion `ExportLock`
+    record beside it, and returns that lock.
+14. **Results locked.** The companion `ExportLock` records the SHA-256 of the
     exact UTF-8 bytes written to the export file, plus the export schema
     version, protocol SHA-256, dataset SHA-256, unit count, disposition counts,
     and a lock timestamp. The lock is derived from the serialized export bytes
@@ -98,7 +137,7 @@ approval. Software supplies none of these and must not guess any of them.
     lock's own fields. Verification re-hashes the file as stored rather than
     re-serializing a parsed model, so any change to the bytes is caught even
     when the document still parses to an equivalent export.
-14. **Analysis without methodology change.** Aggregation runs over the frozen
+15. **Analysis without methodology change.** Aggregation runs over the frozen
     strata. Additional breakdowns are labelled exploratory.
 
 ### Human-review sample and review results are separate types
@@ -117,11 +156,14 @@ model identity, so a reviewer cannot infer which response is the baseline.
 
 ## Launch gate
 
-`evaluate_launch_gate` reports `ready = true` only when every condition holds:
+`evaluate_launch_gate` reports `ready = true` only when every condition holds.
+The software never sets `ready = true`; that field is reserved for external
+human admission.
 
 | Condition | Blocker code when it fails |
 |---|---|
 | Protocol locked | `protocol_not_locked` |
+| Technical admission ready | `protocol_admission_failed` |
 | Fixture set non-empty | `fixture_set_empty` |
 | Every selected fixture live-eligible | `fixtures_not_live_eligible` |
 | Authorization supplied | `launch_authorization_absent` |
@@ -129,8 +171,15 @@ model identity, so a reviewer cannot infer which response is the baseline.
 | Provider access granted | `provider_not_authorized` |
 | Spending granted | `spending_not_authorized` |
 | Authorized provider/model matches target | `authorized_provider_mismatch` |
+| Authorized budget matches protocol budget | `authorized_budget_mismatch` |
+| Fresh hash-pinned pricing snapshot | `pricing_snapshot_unverified` |
+| Runtime HTTPS provider identity matches every frozen role | `provider_configuration_unavailable` |
+| Human admission verified out of band | `human_admission_unverified` (always present for software) |
 
-If any single condition fails, no provider may be called.
+If any single condition fails, no provider may be called. The
+`ProviderCallExecutor` re-verifies that a `ready = true` report is
+internally consistent, so no single condition can be unsatisfied while
+the report still claims readiness.
 
 ## Why software cannot fabricate approval
 
@@ -186,9 +235,37 @@ reserve_call
 
 A provider is never invoked before **both** a successful reservation and the
 transition to `started`. The role counter is consumed at reservation time, so a
-call can neither exceed the ceiling nor vanish from the ledger. There is no
-hidden safety budget and no silent ceiling increase. Replaying an identical
-idempotency key returns the recorded outcome without invoking the provider again.
+call can neither exceed the ceiling nor vanish from the ledger. The monetary
+reservation is applied atomically against the authoritative database state
+(`spent_amount + reserved_spend + estimated_cost <= max_spend`), so concurrent
+reservations cannot oversubscribe the budget. There is no hidden safety budget
+and no silent ceiling increase. Replaying an identical idempotency key returns
+the recorded outcome without invoking the provider again. A settled cost cannot
+exceed its reservation.
+
+## Stop rules
+
+The `StopRuleEvaluator` is wired into the live runner at every decision point:
+
+| Rule | Enforced by | Stop reason code |
+|---|---|---|
+| Launch gate | `ProviderCallExecutor` (authoritative); `evaluate_launch_gate` (redundant preflight) | `launch_gate_not_passed` |
+| Protocol drift | `evaluate_before_target_execution` before every target call | `protocol_drift` |
+| Fixture drift / re-verification | `verify_fixture_before_target_execution` and `evaluate_before_target_execution` before every target call | `fixture_drift` |
+| Fixture live-eligibility | `verify_fixture_before_target_execution` and `evaluate_before_target_execution` (live mode) | `fixture_not_live_eligible` |
+| Target-parameter identity | `evaluate_before_target_execution` and `assert_target_parameters_identical` | `invalid_target_parameters` |
+| Condition order | `evaluate_before_target_execution` and `approved_condition_order` | `invalid_condition_order` |
+| Target provider/model identity | `evaluate_before_target_execution` and the ledger reservation | `provider_authorization_mismatch` |
+| Call ceiling | `reserve_call` (atomic) | `budget_exhausted` |
+| Monetary budget | `reserve_call` (atomic) and `evaluate_before_target_execution` | `monetary_budget_exhausted` |
+| Provider-call outcome | `evaluate_after_provider_call` after every settled call | `provider_failure` |
+| Fallback admission | `evaluate_fallback` whenever a fallback is observed | `fallback_rejected` |
+| Pair completeness | `evaluate_pair_completeness` after every unit | `incomplete_required_pair` |
+| Judge requirement and failure | `evaluate_judge_result` after every paired evaluation | `judge_failure` |
+| Idempotency | `reserve_call` (authoritative); `evaluate_idempotency` (redundant preflight) | `idempotency_violation` |
+
+A failing stop decision halts the unit and records the disposition and reason
+code; it is never silently converted into a successful outcome.
 
 ## Provider failure handling
 
@@ -205,17 +282,40 @@ cancelled`.
   admitted as ordinary primary evidence. Diagnostic artifacts are retained, but
   the run is never relabelled and never silently excluded without a reason code.
 
-## Next engineering milestone
+## Baseline isolation
 
-Before the first real provider call, a live-adapter milestone must still:
+The baseline condition executes the exact original task and nothing else. The
+request passed to the target provider for baseline is
+`{"prompt": original_task, "parameters": frozen_parameters}`. The baseline
+receives no PromptPilot analysis, questions, answers, project memory, documents,
+retrieved context, assembled context, optimized prompt, `PromptVersion`, or
+treatment metadata. Both conditions use the same target provider, model,
+parameters, output limits, timeout policy, and stop configuration; only the
+experimental prompt differs.
 
-1. implement the real provider adapter behind an explicit live mode;
-2. implement the per-unit treatment pipeline against the frozen protocol;
-3. enforce monetary budget at runtime (validated but not yet enforced in the ledger);
-4. enforce `StopRules` at runtime (validated but not yet enforced);
-5. add per-unit fixture re-verification immediately before each target call;
-6. add CLI/API entrypoints for staging and running a live experiment;
-7. obtain the human decisions listed above.
+## Judge blinding
+
+Baseline and PromptPilot responses are randomly mapped to neutral `Response A` /
+`Response B` labels. The judge receives only the neutral labels and never the
+condition identity. The condition mapping is retained outside the judge prompt in
+the evaluation metadata. Scores are mapped back to baseline vs PromptPilot, and
+`overall_delta = PromptPilot - baseline`. The primary evaluator is always
+`llm_judge`; no heuristic fallback may silently replace it. Any judge failure is a
+failure/invalid disposition, not a successful evaluation.
+
+## Remaining prerequisites before the first real provider call
+
+These are genuine human-controlled prerequisites, not engineering tasks:
+
+1. Complete the human research decisions listed above.
+2. Obtain genuine human-reviewed `experimental_candidate` fixtures for all 8 tasks.
+3. Select and confirm the target provider, model, `max_tokens`, and `timeout`.
+4. Obtain provider access authorization and spending authorization out of band.
+5. Lock the protocol and record its hash.
+6. Complete the human-controlled admission and supply a `ready = true`
+   launch-gate report bound to the frozen protocol.
+7. Only then may a human-controlled process start `LiveExperimentRunner` in
+   `live` mode.
 
 ## Research status at this milestone
 

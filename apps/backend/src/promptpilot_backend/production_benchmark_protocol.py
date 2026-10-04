@@ -1,4 +1,4 @@
-"""Typed, offline-only admission for a future live production benchmark.
+"""Typed, offline-only admission for a live production benchmark.
 
 This module validates declarations and frozen files. It never constructs a provider,
 makes a network request, or authorizes execution of a live study.

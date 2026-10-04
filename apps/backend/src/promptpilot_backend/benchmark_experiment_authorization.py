@@ -1,4 +1,4 @@
-"""External launch-authorization boundary for a future live benchmark run.
+"""External launch-authorization boundary for a live benchmark run.
 
 This module deliberately cannot manufacture human approval.
 

@@ -4,6 +4,34 @@ This module implements a reusable stop-rule evaluator that halts execution on
 any condition that violates the frozen experimental protocol. Every stop
 decision is explicit, machine-readable, and never silently converted into a
 successful outcome.
+
+Enforcement map (one fail-closed boundary per invariant):
+
+* Launch gate — authoritatively enforced by
+  :class:`ProviderCallExecutor`, which refuses live execution
+  unless a launch-gate report with ``ready = true`` is supplied.
+  :meth:`StopRuleEvaluator.evaluate_launch_gate` is a redundant
+  preflight, not a second authorization mechanism.
+* Idempotency — authoritatively enforced by
+  :meth:`BenchmarkCallLedger.reserve_call`, which binds an
+  idempotency key to one immutable attempt.
+* Pre-target rules (protocol drift, fixture drift, fixture
+  live-eligibility, target-parameter identity, condition order,
+  target provider/model identity, call and monetary budgets) —
+  enforced by :meth:`StopRuleEvaluator.evaluate_before_target_execution`,
+  which the live runner invokes immediately before every target call.
+* Provider-call outcome — enforced by
+  :meth:`StopRuleEvaluator.evaluate_after_provider_call`, which the
+  ledger-gated runner invokes after every settled provider call.
+* Fallback admission — enforced by
+  :meth:`StopRuleEvaluator.evaluate_fallback`, which the live runner
+  invokes whenever a fallback is observed.
+* Pair completeness — enforced by
+  :meth:`StopRuleEvaluator.evaluate_pair_completeness`, which the live
+  runner invokes after every unit.
+* Judge result — enforced by
+  :meth:`StopRuleEvaluator.evaluate_judge_result`, which the live runner
+  invokes after every paired evaluation.
 """
 
 from __future__ import annotations
@@ -89,7 +117,16 @@ class StopRuleEvaluator:
         target_model: str,
         authorization: Any | None,
     ) -> StopDecision:
-        """Evaluate the launch gate before any execution begins."""
+        """Preflight the frozen launch conditions against an authorization claim.
+
+        The authoritative launch gate is
+        :class:`ProviderCallExecutor`, which refuses live execution
+        unless a launch-gate report carrying ``ready = true`` is
+        supplied. This evaluator is a redundant, fail-closed preflight
+        over the same frozen conditions; it never grants readiness and
+        is not a second authorization mechanism.
+        """
+
         if not protocol_locked:
             return StopDecision(
                 should_stop=True,
@@ -97,7 +134,7 @@ class StopRuleEvaluator:
                 reason_message="Protocol is not locked",
             )
 
-        if not self._launch_authorization:
+        if authorization is None:
             return StopDecision(
                 should_stop=True,
                 reason_code=StopReasonCode.LAUNCH_GATE_NOT_PASSED,
@@ -105,8 +142,8 @@ class StopRuleEvaluator:
             )
 
         # Check authorization binds to protocol
-        if hasattr(self._launch_authorization, "protocol_sha256"):
-            if self._launch_authorization.protocol_sha256 != self._binding.protocol_sha256:
+        if hasattr(authorization, "protocol_sha256"):
+            if authorization.protocol_sha256 != self._binding.protocol_sha256:
                 return StopDecision(
                     should_stop=True,
                     reason_code=StopReasonCode.PROTOCOL_HASH_MISMATCH,
@@ -129,10 +166,30 @@ class StopRuleEvaluator:
                 reason_message="Some fixtures are not live-eligible",
             )
 
+        # Check provider and spending grants
+        if hasattr(authorization, "provider_authorized"):
+            if authorization.provider_authorized is not True:
+                return StopDecision(
+                    should_stop=True,
+                    reason_code=StopReasonCode.PROVIDER_AUTHORIZATION_MISMATCH,
+                    reason_message=(
+                        "Launch authorization does not grant provider access"
+                    ),
+                )
+        if hasattr(authorization, "spending_authorized"):
+            if authorization.spending_authorized is not True:
+                return StopDecision(
+                    should_stop=True,
+                    reason_code=StopReasonCode.PROVIDER_AUTHORIZATION_MISMATCH,
+                    reason_message="Launch authorization does not grant spending",
+                )
+
         # Check provider/model authorization
-        if hasattr(self._launch_authorization, "authorized_provider"):
-            if (self._launch_authorization.authorized_provider,
-                self._launch_authorization.authorized_model) != (target_provider, target_model):
+        if hasattr(authorization, "authorized_provider"):
+            if (
+                authorization.authorized_provider,
+                authorization.authorized_model,
+            ) != (target_provider, target_model):
                 return StopDecision(
                     should_stop=True,
                     reason_code=StopReasonCode.PROVIDER_AUTHORIZATION_MISMATCH,
@@ -348,7 +405,14 @@ class StopRuleEvaluator:
         attempt_status: str,
         existing_attempt_status: str | None,
     ) -> StopDecision:
-        """Evaluate idempotency violations."""
+        """Evaluate idempotency violations.
+
+        Idempotency is authoritatively enforced by
+        :meth:`BenchmarkCallLedger.reserve_call`, which binds an
+        idempotency key to one immutable attempt and returns the
+        recorded outcome without re-invoking the provider. This
+        evaluator is a redundant preflight over the same invariant.
+        """
         if existing_attempt_status in ("succeeded", "failed"):
             # Replay of settled attempt - allowed, but no re-invocation
             return StopDecision(should_stop=False)
