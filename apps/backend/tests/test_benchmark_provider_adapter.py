@@ -1,5 +1,7 @@
 """Safety tests for provider adapter boundary."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from promptpilot_backend.benchmark_provider_adapter import (
@@ -44,16 +46,8 @@ def test_offline_provider_adapter_all_methods():
 
 def test_live_provider_adapter_is_implemented():
     """LiveProviderAdapter is now implemented and wraps LLMProvider."""
-    from promptpilot_backend.llm_provider import OpenAICompatibleProvider
-
-    # LiveProviderAdapter now wraps an LLMProvider
-    llm_provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
-    llm_provider.base_url = "https://example.invalid"
-    llm_provider.model = "test-model"
-    llm_provider.api_key = ""
-
     adapter = LiveProviderAdapter(
-        llm_provider=object(),  # mock
+        llm_provider=SimpleNamespace(name="openrouter", model="gpt-4"),
         role="target_execution",
         provider_name="openrouter",
         model_name="gpt-4",
@@ -64,6 +58,23 @@ def test_live_provider_adapter_is_implemented():
     assert adapter.role == "target_execution"
 
 
+def test_live_provider_adapter_rejects_provider_or_model_drift():
+    with pytest.raises(AdapterConfigurationError, match="provider"):
+        LiveProviderAdapter(
+            llm_provider=SimpleNamespace(name="another-provider", model="gpt-4"),
+            role="target_execution",
+            provider_name="openrouter",
+            model_name="gpt-4",
+        )
+    with pytest.raises(AdapterConfigurationError, match="model"):
+        LiveProviderAdapter(
+            llm_provider=SimpleNamespace(name="openrouter", model="another-model"),
+            role="target_execution",
+            provider_name="openrouter",
+            model_name="gpt-4",
+        )
+
+
 def test_provider_adapter_factory_offline_mode():
     factory = ProviderAdapterFactory("offline_dry_run")
     adapter = factory.create_adapter("analysis", "offline-test", "model-test")
@@ -71,13 +82,27 @@ def test_provider_adapter_factory_offline_mode():
     assert adapter.is_offline is True
 
 
-def test_provider_adapter_factory_live_mode_creates_live_adapter():
+def test_provider_adapter_factory_live_mode_creates_matching_live_adapter(monkeypatch):
+    monkeypatch.setattr(
+        "promptpilot_backend.llm_provider.OpenAICompatibleProvider",
+        lambda: SimpleNamespace(name="openrouter", model="gpt-4"),
+    )
     factory = ProviderAdapterFactory("live")
     adapter = factory.create_adapter("analysis", "openrouter", "gpt-4")
     # In live mode, factory creates a LiveProviderAdapter
     assert not adapter.is_offline
     assert adapter.provider_name == "openrouter"
     assert adapter.model_name == "gpt-4"
+
+
+def test_provider_adapter_factory_rejects_frozen_model_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        "promptpilot_backend.llm_provider.OpenAICompatibleProvider",
+        lambda: SimpleNamespace(name="openrouter", model="gpt-4"),
+    )
+    factory = ProviderAdapterFactory("live")
+    with pytest.raises(AdapterConfigurationError, match="frozen provider assignment"):
+        factory.create_adapter("target_execution", "openrouter", "different-model")
 
 
 def test_provider_adapter_factory_invalid_mode():

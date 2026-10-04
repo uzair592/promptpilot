@@ -455,6 +455,10 @@ def test_attempt_lifecycle_usage_cost_cancel_and_snapshot(client, db_session) ->
     succeeded = BenchmarkCallLedger.reserve_call(
         db_session, run.id, declaration(value, key="success", estimated_cost=0.01, currency="USD")
     )
+    reserved_snapshot = BenchmarkCallLedger.budget_snapshot(db_session, run.id)
+    assert reserved_snapshot.spent_amount == 0
+    assert reserved_snapshot.remaining_spend == pytest.approx(9.99)
+    assert db_session.get(BenchmarkExperimentRun, run.id).reserved_spend == pytest.approx(0.01)
     BenchmarkCallLedger.mark_started(db_session, succeeded.id)
     succeeded = BenchmarkCallLedger.mark_succeeded(
         db_session,
@@ -469,15 +473,53 @@ def test_attempt_lifecycle_usage_cost_cancel_and_snapshot(client, db_session) ->
         ),
     )
     assert succeeded.status == "succeeded" and succeeded.total_tokens == 5
+    settled_snapshot = BenchmarkCallLedger.budget_snapshot(db_session, run.id)
+    assert settled_snapshot.spent_amount == pytest.approx(0.01)
+    assert settled_snapshot.remaining_spend == pytest.approx(9.99)
+    assert db_session.get(BenchmarkExperimentRun, run.id).reserved_spend == 0
 
     cancelled = BenchmarkCallLedger.reserve_call(
-        db_session, run.id, declaration(value, key="cancel")
+        db_session,
+        run.id,
+        declaration(value, key="cancel", estimated_cost=0.02, currency="USD"),
     )
     BenchmarkCallLedger.cancel_reservation(db_session, cancelled.id)
     snapshot = BenchmarkCallLedger.budget_snapshot(db_session, run.id)
     assert snapshot.reserved == 0
     assert snapshot.succeeded == 1 and snapshot.cancelled == 1
     assert snapshot.consumed_by_role.analysis == 1
+    assert snapshot.spent_amount == pytest.approx(0.01)
+    assert snapshot.remaining_spend == pytest.approx(9.99)
+    assert db_session.get(BenchmarkExperimentRun, run.id).reserved_spend == 0
+
+
+def test_failed_started_call_conservatively_settles_reserved_cost(client, db_session) -> None:
+    value = protocol()
+    data = value.model_dump(mode="python")
+    data["monetary_budget"] = {
+        "currency": "USD",
+        "maximum_cost": 10,
+        "pricing_snapshot_reference": "unverified-unit-test://pricing",
+    }
+    value = LiveStudyProtocol.model_validate(data)
+    run = running_run(db_session, client, value)
+    attempt = BenchmarkCallLedger.reserve_call(
+        db_session,
+        run.id,
+        declaration(value, key="failed-cost", estimated_cost=0.25, currency="USD"),
+    )
+    BenchmarkCallLedger.mark_started(db_session, attempt.id)
+    BenchmarkCallLedger.mark_failed_from_exception(
+        db_session,
+        attempt.id,
+        RuntimeError("offline test failure"),
+        safe_error_code="provider_unavailable",
+    )
+
+    snapshot = BenchmarkCallLedger.budget_snapshot(db_session, run.id)
+    assert snapshot.spent_amount == pytest.approx(0.25)
+    assert snapshot.remaining_spend == pytest.approx(9.75)
+    assert db_session.get(BenchmarkExperimentRun, run.id).reserved_spend == 0
 
 
 def test_invalid_transitions_terminal_runs_and_finalize_consistency(client, db_session) -> None:

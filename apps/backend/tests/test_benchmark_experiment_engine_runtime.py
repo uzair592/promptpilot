@@ -2,13 +2,15 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
 from conftest import EXPERIMENT_TASK_IDS as TASK_IDS
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from promptpilot_backend.benchmark_call_ledger import (
+    BenchmarkCallLedger,
     LedgerError,
     canonical_artifact_sha256,
 )
@@ -42,7 +44,10 @@ from promptpilot_backend.benchmark_experiment_results import (
     write_export,
 )
 from promptpilot_backend.db import SessionLocal
-from promptpilot_backend.models import BenchmarkProviderCallAttempt
+from promptpilot_backend.models import (
+    BenchmarkExperimentRun,
+    BenchmarkProviderCallAttempt,
+)
 
 DATASET_SHA = "8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d"
 PROTOCOL_SHA = "a" * 64
@@ -114,6 +119,85 @@ def test_executor_rejects_live_mode_without_launch_gate() -> None:
     assert caught.value.code == "launch_gate_required"
 
 
+def test_executor_rejects_offline_fixture_provider_in_live_mode(experiment_env) -> None:
+    provider = OfflineProvider()
+    executor = ProviderCallExecutor(
+        SessionLocal(),
+        UUID(int=0),
+        experiment_env.binding,
+        execution_mode="live",
+        launch_gate_report=SimpleNamespace(ready=True, blockers=[]),
+    )
+
+    with pytest.raises(ExecutionGateError) as caught:
+        executor.execute(
+            provider=provider,
+            role="analysis",
+            stable_unit_id="task#r1",
+            task_id="planning-launch-001",
+            fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+            repetition=1,
+            provider_name="offline-test",
+            model_name="analysis-test-model",
+            request_payload={"p": 1},
+            invoke=provider.invoke,
+            stable_token="unit1:live-offline",
+        )
+
+    assert caught.value.code == "offline_provider_rejected"
+    assert provider.calls == 0
+
+
+def test_budgeted_live_call_fails_before_invoke_without_cost_estimate(experiment_env) -> None:
+    run_id = experiment_env.run_id
+    with SessionLocal() as db:
+        db.execute(
+            update(BenchmarkExperimentRun)
+            .where(BenchmarkExperimentRun.id == run_id)
+            .values(max_spend=1.0, budget_currency="USD", spent_currency="USD")
+        )
+        db.commit()
+
+    class LiveProviderWithoutEstimator:
+        name = "openrouter"
+        model = "target-model"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def invoke(self) -> object:
+            self.calls += 1
+            raise AssertionError("Provider invocation must be blocked")
+
+    provider = LiveProviderWithoutEstimator()
+    executor = ProviderCallExecutor(
+        SessionLocal(),
+        run_id,
+        experiment_env.binding,
+        execution_mode="live",
+        launch_gate_report=SimpleNamespace(ready=True, blockers=[]),
+    )
+
+    with pytest.raises(ExecutionGateError) as caught:
+        executor.execute(
+            provider=provider,
+            role="analysis",
+            stable_unit_id="task#r1",
+            task_id="planning-launch-001",
+            fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+            repetition=1,
+            provider_name="offline-test",
+            model_name="analysis-test-model",
+            request_payload={"p": 1},
+            invoke=provider.invoke,
+            stable_token="unit1:live-cost",
+        )
+
+    assert caught.value.code == "cost_estimate_unavailable"
+    assert provider.calls == 0
+    _assert_no_attempts(run_id)
+
+
 def test_executor_accounts_a_successful_call(experiment_env) -> None:
     executor = make_executor(experiment_env)
     run_id = experiment_env.run_id
@@ -135,6 +219,48 @@ def test_executor_accounts_a_successful_call(experiment_env) -> None:
     assert provider.calls == 1
     assert call.request_sha256 == canonical_artifact_sha256({"p": 1})
     _assert_attempt(run_id, "analysis", "succeeded")
+
+
+def test_budgeted_executor_reserves_and_settles_pre_call_estimate(experiment_env) -> None:
+    run_id = experiment_env.run_id
+    with SessionLocal() as db:
+        db.execute(
+            update(BenchmarkExperimentRun)
+            .where(BenchmarkExperimentRun.id == run_id)
+            .values(max_spend=1.0, budget_currency="USD", spent_currency="USD")
+        )
+        db.commit()
+
+    class CostedOfflineProvider(OfflineProvider):
+        def estimate_cost(self, request_payload: object) -> float:
+            return 0.2
+
+    provider = CostedOfflineProvider()
+    executor = make_executor(experiment_env)
+    call = executor.execute(
+        provider=provider,
+        role="analysis",
+        stable_unit_id="task#r1",
+        task_id="planning-launch-001",
+        fixture_id=executor.binding.fixture_bindings[0].fixture_id,
+        repetition=1,
+        provider_name="offline-test",
+        model_name="analysis-test-model",
+        request_payload={"p": 1},
+        invoke=provider.invoke,
+        stable_token="unit1:budgeted-analysis",
+    )
+
+    assert call.status == "succeeded"
+    assert provider.calls == 1
+    with SessionLocal() as db:
+        snapshot = BenchmarkCallLedger.budget_snapshot(db, run_id)
+        attempt = db.get(BenchmarkProviderCallAttempt, call.attempt_id)
+        run = db.get(BenchmarkExperimentRun, run_id)
+    assert attempt is not None and attempt.cost_estimate == pytest.approx(0.2)
+    assert run is not None and run.reserved_spend == 0
+    assert snapshot.spent_amount == pytest.approx(0.2)
+    assert snapshot.remaining_spend == pytest.approx(0.8)
 
 
 def test_executor_marks_provider_failure_without_retry(experiment_env) -> None:

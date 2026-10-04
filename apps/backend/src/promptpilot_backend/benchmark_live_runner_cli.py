@@ -44,12 +44,13 @@ from .db import SessionLocal
 from .production_benchmark_protocol import (
     LiveStudyProtocol,
     admit_protocol,
+    protocol_sha256,
 )
 
 
-def load_protocol(path: Path) -> LiveStudyProtocol:
+def load_protocol(path: Path | str) -> LiveStudyProtocol:
     """Load and validate a protocol file."""
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     return LiveStudyProtocol.model_validate(data)
 
 
@@ -83,9 +84,10 @@ def load_manifests(
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate a protocol against the dataset."""
     try:
-        protocol = load_protocol(args.protocol)
-        dataset = load_dataset(args.dataset)
-        report = admit_protocol(protocol, dataset, args.protocol)
+        protocol_path = Path(args.protocol)
+        protocol = load_protocol(protocol_path)
+        dataset = load_dataset(Path(args.dataset))
+        report = admit_protocol(protocol, dataset, protocol_path)
         print(json.dumps(report.model_dump(mode="json"), indent=2, sort_keys=True))
         return 0 if report.ready else 1
     except Exception as e:
@@ -96,11 +98,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def cmd_dry_run(args: argparse.Namespace) -> int:
     """Run a complete dry-run simulation."""
     try:
-        protocol = load_protocol(args.protocol)
-        dataset = load_dataset(args.dataset)
+        protocol_path = Path(args.protocol)
+        protocol = load_protocol(protocol_path)
+        dataset = load_dataset(Path(args.dataset))
 
         # Load manifests to get task_ids from fixture manifests
-        fixtures_dir = Path(args.protocol).parent / "fixtures"
+        fixtures_dir = protocol_path.parent
         manifests = load_manifests(protocol, fixtures_dir, dataset)
         task_ids = sorted({m.task_id for m, _ in manifests.values()})
         plan = plan_dry_run(
@@ -140,15 +143,16 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
 def cmd_stage(args: argparse.Namespace) -> int:
     """Stage an experiment run (requires admission)."""
     try:
-        protocol = load_protocol(args.protocol)
-        dataset = load_dataset(args.dataset)
+        protocol_path = Path(args.protocol)
+        protocol = load_protocol(protocol_path)
+        dataset = load_dataset(Path(args.dataset))
 
         # Load manifests
-        fixtures_dir = Path(args.protocol).parent / "fixtures"
+        fixtures_dir = protocol_path.parent
         load_manifests(protocol, fixtures_dir, dataset)
 
         # Run admission
-        report = admit_protocol(protocol, dataset, args.protocol)
+        report = admit_protocol(protocol, dataset, protocol_path)
         if not report.ready:
             print("Admission not ready:", file=sys.stderr)
             for blocker in report.blockers:
@@ -213,18 +217,26 @@ def cmd_inspect(args: argparse.Namespace) -> int:
 def cmd_launch_gate(args: argparse.Namespace) -> int:
     """Evaluate the launch gate."""
     try:
-        protocol = load_protocol(args.protocol)
-        dataset = load_dataset(args.dataset)
+        protocol_path = Path(args.protocol)
+        protocol = load_protocol(protocol_path)
+        dataset = load_dataset(Path(args.dataset))
 
         if args.authorization:
             auth = parse_authorization(json.loads(Path(args.authorization).read_text()))
         else:
             auth = None
 
-        # Check admission
-        admit_protocol(protocol, dataset, args.protocol)
-        Path(args.protocol).parent / "fixtures"
-        manifests = load_manifests(protocol, Path(args.protocol).parent / "fixtures", dataset)
+        # Check admission before reporting launch readiness.
+        admission = admit_protocol(protocol, dataset, protocol_path)
+        if not admission.ready:
+            print("Admission not ready:", file=sys.stderr)
+            for admission_blocker in admission.blockers:
+                print(
+                    f"  {admission_blocker.code}: {admission_blocker.message}",
+                    file=sys.stderr,
+                )
+            return 1
+        manifests = load_manifests(protocol, protocol_path.parent, dataset)
 
         fixture_ids = list(manifests.keys())
         live_eligible = [fid for fid, (m, _) in manifests.items() if m.live_eligible]
@@ -234,7 +246,7 @@ def cmd_launch_gate(args: argparse.Namespace) -> int:
             protocol_locked=(protocol.review is not None and protocol.review.status == "locked"),
             fixture_ids=fixture_ids,
             live_eligible_fixture_ids=live_eligible,
-            protocol_sha256=protocol.model_dump().get("protocol_sha256", ""),
+            protocol_sha256=protocol_sha256(protocol),
             authorization=auth,
             target_provider=protocol.providers.baseline_target.provider,
             target_model=protocol.providers.baseline_target.model,
@@ -251,8 +263,8 @@ def cmd_launch_gate(args: argparse.Namespace) -> int:
 
         if launch_report.blockers:
             print("Blockers:")
-            for blocker in launch_report.blockers:
-                print(f"  {blocker.code}: {blocker.message}")
+            for gate_blocker in launch_report.blockers:
+                print(f"  {gate_blocker.code}: {gate_blocker.message}")
 
         print(f"\nSoftware Limitation: {launch_report.software_verification_limit}")
 

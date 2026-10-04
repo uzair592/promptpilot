@@ -44,6 +44,7 @@ from .benchmark_experiment_binding import (
 )
 from .benchmark_fixtures import FixtureManifest
 from .llm_provider import OpenAICompatibleProvider
+from .models import BenchmarkExperimentRun
 
 # Execution modes. "live" is only usable when the launch gate passes.
 ExecutionMode = Literal["offline_dry_run", "live"]
@@ -67,10 +68,15 @@ def require_offline_provider(
 ) -> None:
     """Reject anything that is not an explicitly offline fixture provider in offline mode.
 
-    In live mode, real providers are allowed (they must pass the launch gate).
+    In live mode, offline fixtures are rejected; real providers must pass the launch gate.
     """
 
     if execution_mode == "live":
+        if getattr(provider, "offline_fixture", False) is True:
+            raise ExecutionGateError(
+                "offline_provider_rejected",
+                f"Offline fixture providers cannot execute in live mode ({role})",
+            )
         # In live mode, real providers are allowed (launch gate already verified)
         return
 
@@ -168,6 +174,39 @@ class ProviderCallExecutor:
         """Run one provider-backed stage through the full ledger lifecycle."""
 
         require_offline_provider(provider, role, self._mode)
+        run = self._db.get(BenchmarkExperimentRun, self._run_id)
+        if self._mode == "live" and run is None:
+            raise ExecutionGateError(
+                "run_not_found",
+                "Live provider calls require an existing staged experiment run",
+            )
+        if self._mode == "live" and run is not None and run.max_spend is None:
+            raise ExecutionGateError(
+                "monetary_budget_not_configured",
+                "Live provider calls require a configured monetary budget",
+            )
+        estimated_cost = None
+        currency = None
+        if run is not None and run.max_spend is not None:
+            estimate_cost = getattr(provider, "estimate_cost", None)
+            if not callable(estimate_cost):
+                raise ExecutionGateError(
+                    "cost_estimate_unavailable",
+                    "Budgeted calls require a pre-call cost estimate",
+                )
+            # Budgeted calls require an adapter-provided pre-call upper bound.
+            estimated_cost = estimate_cost(request_payload)
+            if estimated_cost is None:
+                raise ExecutionGateError(
+                    "cost_estimate_unavailable",
+                    "Budgeted calls require a pre-call cost estimate",
+                )
+            currency = run.budget_currency
+            if currency is None:
+                raise ExecutionGateError(
+                    "budget_currency_unavailable",
+                    "Budgeted calls require a configured currency",
+                )
         request_sha256 = canonical_artifact_sha256(request_payload)
         parameter_sha256 = (
             self._binding.target_parameters.generation_parameter_sha256
@@ -188,6 +227,8 @@ class ProviderCallExecutor:
             request_artifact_sha256=request_sha256,
             protocol_sha256=self._binding.protocol_sha256,
             dataset_sha256=self._binding.dataset_sha256,
+            estimated_cost=estimated_cost,
+            currency=currency,
         )
         attempt = BenchmarkCallLedger.reserve_call(self._db, self._run_id, declaration)
         if attempt.status != "reserved":
@@ -314,6 +355,8 @@ def verify_fixture_before_target_execution(
     manifest: FixtureManifest,
     dataset: Any,
     manifest_path: Any,
+    *,
+    execution_mode: ExecutionMode = "live",
 ) -> None:
     """Re-verify fixture against its frozen binding immediately before target execution.
 
@@ -322,15 +365,27 @@ def verify_fixture_before_target_execution(
     exactly, including all document hashes, clarification answer hashes, and
     review status. Any drift causes an immediate stop.
 
+    Fixture integrity (identity, hashes, drift) is enforced in every mode.
+    The ``live_eligible`` requirement (an ``experimental_candidate`` carrying a
+    ``human_approved`` review) is a *live-study* boundary: it is enforced only
+    in ``live`` mode. Offline dry runs may execute clearly-labelled synthetic
+    fixtures so the orchestration can be exercised end-to-end without real
+    providers, without spending, and without fabricating any human approval.
+    The live-study boundary therefore remains fail-closed: a synthetic fixture
+    can never reach a live target execution.
+
     Args:
         binding: The frozen protocol binding containing the fixture bindings.
         fixture_id: The ID of the fixture to verify.
         manifest: The current fixture manifest to verify.
         dataset: The benchmark dataset for identity verification.
         manifest_path: Path to the manifest file.
+        execution_mode: The execution mode. ``live`` additionally requires the
+            fixture to be live-eligible.
 
     Raises:
-        ExecutionGateError: If the fixture has drifted or is not live-eligible.
+        ExecutionGateError: If the fixture has drifted or, in live mode, is
+            not live-eligible.
     """
 
     # This will raise BindingError if the fixture has drifted
@@ -341,7 +396,13 @@ def verify_fixture_before_target_execution(
     except BindingError as e:
         raise ExecutionGateError(e.code, e.args[0] if e.args else str(e)) from e
 
-    # Additional check: fixture must be live-eligible
+    # The live-study boundary: only a human-reviewed experimental candidate may
+    # execute a real target. Offline dry runs are exempt because they never
+    # contact a provider, but they still must have passed the integrity check
+    # above. This default ("live") keeps every existing caller fail-closed.
+    if execution_mode != "live":
+        return
+
     frozen = next(
         (f for f in binding.fixture_bindings if f.fixture_id == fixture_id), None
     )

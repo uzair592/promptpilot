@@ -10,6 +10,8 @@ constructs or calls a real provider without going through the adapter layer.
 
 from __future__ import annotations
 
+import json
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -96,6 +98,8 @@ class OfflineProviderAdapter:
     responses based on the fixture data. Used for offline dry runs and tests.
     """
 
+    offline_fixture = True
+
     def __init__(
         self,
         role: str,
@@ -147,45 +151,102 @@ class OfflineProviderAdapter:
         content = self._responses.get(key, f"{prefix}{prompt[:50]}")
         return self._make_response(content, "generate")
 
+    def _structured(self, model_payload: dict[str, Any]) -> dict[str, Any]:
+        """Return a provider-shaped response whose content is valid JSON.
+
+        The guarded runner parses the ``content`` field into the structured
+        output model for each role, so every offline adapter response must
+        carry a serialisable payload rather than free text.
+        """
+
+        return self._make_response(json.dumps(model_payload, sort_keys=True), "structured")
+
     def generate_question(
         self,
-        prompt: str,
+        prompt: dict[str, Any] | str,
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        key = f"question:{prompt[:50]}"
-        prefix = f"[offline:{self._role}] generated question for: "
-        content = self._responses.get(key, f"{prefix}{prompt[:50]}")
-        return self._make_response(content, "question")
+        payload = prompt if isinstance(prompt, dict) else {}
+        gap_id = str(payload.get("gap_id", "") or "")
+        gap_target = str(payload.get("gap_target", "") or "")
+        question_text = (
+            gap_target
+            if 3 <= len(gap_target) <= 500
+            else "Offline clarification question"
+        )
+        try:
+            priority = int(payload.get("priority", 1) or 1)
+        except (TypeError, ValueError):
+            priority = 1
+        return self._structured(
+            {
+                "question_text": question_text,
+                "question_type": "free_text",
+                "related_gap": gap_id,
+                "priority": max(0, priority),
+                "rationale": "Offline fixture question derived from the information gap.",
+            }
+        )
 
     def generate_prompt(
         self,
-        prompt: str,
+        prompt: dict[str, Any] | str,
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        key = f"prompt:{prompt[:50]}"
-        prefix = f"[offline:{self._role}] generated prompt for: "
-        content = self._responses.get(key, f"{prefix}{prompt[:50]}")
-        return self._make_response(content, "prompt")
+        return self._structured(
+            {
+                "optimized_prompt": "Offline optimized prompt using the supplied context.",
+                "task_summary": "Offline task summary",
+                "assumptions": [],
+                "incorporated_context": [],
+                "incorporated_requirements": [],
+                "output_format": "text",
+                "quality_notes": [],
+                "warnings": ["Offline fixture: no real provider was contacted."],
+                "generation_metadata": {"offline": True},
+            }
+        )
 
     def judge_response(
         self,
         task: str,
         response_a: str,
         response_b: str,
-        evidence: dict[str, Any],
+        evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        key = f"judge:{task[:50]}"
-        content = self._responses.get(key, '{"winner": "A", "scores": {"a": 80, "b": 70}}')
-        return self._make_response(content, "judge")
+        score = {
+            "relevance": 75,
+            "completeness": 75,
+            "instruction_following": 75,
+            "contextual_grounding": 75,
+            "clarity": 75,
+            "explanations": {},
+            "evidence": {},
+        }
+        return self._structured({"response_a": score, "response_b": score})
 
     def analyze(
         self,
         prompt: str,
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        key = f"analyze:{prompt[:50]}"
-        content = self._responses.get(key, f"[offline:analysis] analysis for: {prompt[:50]}")
-        return self._make_response(content, "analyze")
+        text = prompt if isinstance(prompt, str) else ""
+        try:
+            from .analyzer_service import classify_task
+
+            category = classify_task(text)
+        except Exception:
+            category = "general"
+        return self._structured(
+            {
+                "task_category": category,
+                "dimensions": {},
+                "information_gaps": [],
+            }
+        )
+
+    def estimate_cost(self, request_payload: Any) -> float:
+        return 0.0
 
 
 class LiveProviderAdapter:
@@ -202,6 +263,14 @@ class LiveProviderAdapter:
         provider_name: str,
         model_name: str,
     ) -> None:
+        if getattr(llm_provider, "name", None) != provider_name:
+            raise AdapterConfigurationError(
+                "Configured provider differs from the live provider implementation"
+            )
+        if getattr(llm_provider, "model", None) != model_name:
+            raise AdapterConfigurationError(
+                "Configured model differs from the live provider implementation"
+            )
         self._llm_provider = llm_provider
         self._role = role
         self._provider_name = provider_name
@@ -337,8 +406,23 @@ class LiveProviderAdapter:
     def health_check(self) -> bool:
         return True
 
-    def estimate_cost(self, prompt: str, parameters: dict[str, Any] | None = None) -> float | None:
-        return None
+    def estimate_cost(self, request_payload: Any) -> float | None:
+        estimator = getattr(self._llm_provider, "estimate_cost", None)
+        if not callable(estimator):
+            return None
+        estimate = estimator(request_payload)
+        if estimate is None:
+            return None
+        if (
+            isinstance(estimate, bool)
+            or not isinstance(estimate, (int, float))
+            or not math.isfinite(estimate)
+            or estimate < 0
+        ):
+            raise AdapterConfigurationError(
+                "Live provider returned an invalid pre-call cost estimate"
+            )
+        return float(estimate)
 
 
 class ProviderAdapterFactory:
@@ -383,7 +467,12 @@ class ProviderAdapterFactory:
             # Live mode requires explicit launch authorization
             # which is verified by the launch gate before factory creation
             from .llm_provider import OpenAICompatibleProvider
+
             llm_provider = OpenAICompatibleProvider()
+            if llm_provider.name != provider or llm_provider.model != model:
+                raise AdapterConfigurationError(
+                    "Live provider settings do not match the frozen provider assignment"
+                )
             return LiveProviderAdapter(
                 llm_provider=llm_provider,
                 role=provider,
