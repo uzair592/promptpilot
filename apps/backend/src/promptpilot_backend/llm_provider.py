@@ -82,10 +82,9 @@ class ProviderConfigurationError(ProviderError):
 
 
 class OpenAICompatibleProvider:
-    name = "openai-compatible"
-
     def __init__(self) -> None:
         settings = get_settings()
+        self.name = getattr(settings, "llm_provider", "")
         self.base_url = settings.llm_base_url
         self.model = settings.llm_model
         self.api_key = settings.llm_api_key

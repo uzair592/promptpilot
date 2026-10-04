@@ -15,7 +15,7 @@ from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter, model_validator
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -105,13 +105,23 @@ def canonical_artifact_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def generation_parameters_sha256(protocol: LiveStudyProtocol) -> str:
-    checked = LiveStudyProtocol.model_validate(
-        protocol.model_dump(mode="python", warnings=False)
-    )
-    return canonical_artifact_sha256(
-        checked.baseline_target_parameters.model_dump(mode="json")
-    )
+def generation_parameters_sha256(
+    protocol_or_params: LiveStudyProtocol | Any,
+) -> str:
+    """Compute SHA-256 of generation parameters.
+
+    Accepts either a LiveStudyProtocol (uses baseline_target_parameters) or
+    TargetGenerationParameters directly.
+    """
+    # Check if it's a protocol or parameters directly
+    if hasattr(protocol_or_params, "baseline_target_parameters"):
+        # It's a protocol
+        params = protocol_or_params.baseline_target_parameters
+    else:
+        # Assume it's TargetGenerationParameters
+        params = protocol_or_params
+
+    return canonical_artifact_sha256(params.model_dump(mode="json"))
 
 
 class LedgerError(ValueError):
@@ -138,12 +148,22 @@ class ReservationDeclaration(StrictLedgerModel):
     request_artifact_sha256: Sha256
     protocol_sha256: Sha256
     dataset_sha256: Sha256
+    estimated_cost: StrictFiniteFloat | None = Field(default=None, ge=0)
+    currency: Annotated[
+        str, StringConstraints(strict=True, pattern=r"^[A-Z]{3}$")
+    ] | None = None
 
     @model_validator(mode="before")
     @classmethod
     def reject_credentials(cls, value: Any) -> Any:
         _reject_sensitive(value)
         return value
+
+    @model_validator(mode="after")
+    def cost_and_currency_consistent(self) -> ReservationDeclaration:
+        if (self.estimated_cost is None) != (self.currency is None):
+            raise ValueError("Estimated cost and currency must be supplied together")
+        return self
 
     @model_validator(mode="after")
     def condition_matches_role(self) -> ReservationDeclaration:
@@ -205,6 +225,11 @@ class BudgetSnapshot(StrictLedgerModel):
     cancelled: StrictInteger
     remaining_by_role: RoleCallBudget
     remaining_total: StrictInteger
+    max_spend: float | None = None
+    spent_amount: float = 0.0
+    spent_currency: str | None = None
+    budget_currency: str | None = None
+    remaining_spend: float | None = None
 
 
 def _role_bindings(protocol: LiveStudyProtocol) -> dict[str, RoleBinding]:
@@ -372,6 +397,17 @@ class BenchmarkCallLedger:
                 if checked_protocol.monetary_budget is not None
                 else None
             ),
+            max_spend=(
+                checked_protocol.monetary_budget.maximum_cost
+                if checked_protocol.monetary_budget is not None
+                else None
+            ),
+            spent_amount=0.0,
+            spent_currency=(
+                checked_protocol.monetary_budget.currency
+                if checked_protocol.monetary_budget is not None
+                else None
+            ),
             external_human_approval_verified=False,
             repository_commit_sha=repository_commit_sha,
         )
@@ -431,8 +467,51 @@ class BenchmarkCallLedger:
             if run is None:
                 raise LedgerError("run_not_found", "Experiment run does not exist")
             BenchmarkCallLedger._validate_reservation(run, checked)
-            counter_name = _ROLE_COUNTERS[checked.provider_role]
+
+            # Enforce monetary budget if estimated cost is provided
+            if checked.estimated_cost is not None:
+                if run.max_spend is None:
+                    raise LedgerError(
+                        "monetary_budget_not_configured",
+                        "Monetary budget not configured for this experiment run",
+                    )
+                projected = run.spent_amount + run.reserved_spend + checked.estimated_cost
+                if projected > run.max_spend:
+                    raise LedgerError(
+                        "monetary_budget_exhausted",
+                        "Estimated cost would exceed authorized monetary budget",
+                    )
+                if checked.currency != run.budget_currency:
+                    raise LedgerError(
+                        "currency_mismatch",
+                        "Estimated cost currency differs from run budget currency",
+                    )
+
+                # Atomically reserve monetary budget against the authoritative run state.
+                updated = cast(
+                    CursorResult[Any],
+                    db.execute(
+                        update(BenchmarkExperimentRun)
+                        .where(
+                            BenchmarkExperimentRun.id == run_id,
+                            BenchmarkExperimentRun.spent_amount
+                            + BenchmarkExperimentRun.reserved_spend
+                            + checked.estimated_cost
+                            <= run.max_spend,
+                        )
+                        .values(
+                            reserved_spend=BenchmarkExperimentRun.reserved_spend
+                            + checked.estimated_cost,
+                        )
+                    )
+                )
+                if updated.rowcount != 1:
+                    raise LedgerError(
+                        "monetary_budget_exhausted",
+                        "Estimated cost would exceed authorized monetary budget",
+                    )
             ceiling_name = _ROLE_CEILINGS[checked.provider_role]
+            counter_name = _ROLE_COUNTERS[checked.provider_role]
             counter = getattr(BenchmarkExperimentRun, counter_name)
             ceiling = getattr(BenchmarkExperimentRun, ceiling_name)
             total_consumed = (
@@ -482,6 +561,8 @@ class BenchmarkCallLedger:
                 request_artifact_sha256=checked.request_artifact_sha256,
                 status="reserved",
                 reserved_at=_now(),
+                cost_estimate=checked.estimated_cost,
+                currency=checked.currency,
                 observation_outcome="not_recorded",
             )
             db.add(attempt)
@@ -540,6 +621,13 @@ class BenchmarkCallLedger:
         if checked.cost_estimate is not None and checked.currency != run.budget_currency:
             db.rollback()
             raise LedgerError("currency_mismatch", "Attempt currency differs from run budget")
+        settled_cost, settled_currency = BenchmarkCallLedger._settle_reserved_cost(
+            db,
+            attempt,
+            run,
+            checked.cost_estimate,
+            checked.currency,
+        )
         changed = cast(
             CursorResult[Any],
             db.execute(
@@ -554,8 +642,8 @@ class BenchmarkCallLedger:
                     input_tokens=checked.input_tokens,
                     output_tokens=checked.output_tokens,
                     total_tokens=checked.total_tokens,
-                    cost_estimate=checked.cost_estimate,
-                    currency=checked.currency,
+                    cost_estimate=settled_cost,
+                    currency=settled_currency,
                     fallback_classification=checked.fallback_classification,
                     observation_outcome=checked.observation_outcome,
                     response_artifact_sha256=checked.response_artifact_sha256,
@@ -606,6 +694,7 @@ class BenchmarkCallLedger:
         if changed.rowcount != 1:
             db.rollback()
             raise LedgerError("invalid_attempt_transition", "Attempt cannot fail")
+        BenchmarkCallLedger._settle_reserved_cost(db, attempt, run, None, None)
         db.execute(
             update(BenchmarkExperimentRun)
             .where(BenchmarkExperimentRun.id == run.id)
@@ -657,6 +746,7 @@ class BenchmarkCallLedger:
         if changed.rowcount != 1:
             db.rollback()
             raise LedgerError("invalid_attempt_transition", "Only a reservation may cancel")
+        BenchmarkCallLedger._release_reserved_cost(db, run.id, attempt.cost_estimate)
         db.execute(
             update(BenchmarkExperimentRun)
             .where(BenchmarkExperimentRun.id == run.id)
@@ -683,6 +773,11 @@ class BenchmarkCallLedger:
             }
         )
         total_used = run.reserved_count + run.succeeded_count + run.failed_count
+        remaining_spend = None
+        if run.max_spend is not None:
+            remaining_spend = max(
+                0.0, run.max_spend - run.spent_amount - run.reserved_spend
+            )
         return BudgetSnapshot(
             run_id=run.id,
             status=cast(
@@ -698,6 +793,11 @@ class BenchmarkCallLedger:
             cancelled=run.cancelled_count,
             remaining_by_role=remaining,
             remaining_total=max(0, run.total_call_ceiling - total_used),
+            max_spend=run.max_spend,
+            spent_amount=run.spent_amount,
+            spent_currency=run.spent_currency,
+            budget_currency=run.budget_currency,
+            remaining_spend=remaining_spend,
         )
 
     @staticmethod
@@ -838,11 +938,17 @@ class BenchmarkCallLedger:
         failed = 0
         for attempt in attempts:
             if attempt.status == "reserved":
+                BenchmarkCallLedger._release_reserved_cost(
+                    db, run_id, attempt.cost_estimate
+                )
                 attempt.status = "cancelled"
                 cancelled += 1
                 counter_name = _ROLE_COUNTERS[attempt.provider_role]
                 setattr(run, counter_name, getattr(run, counter_name) - 1)
             else:
+                BenchmarkCallLedger._settle_reserved_cost(
+                    db, attempt, run, None, None
+                )
                 attempt.status = "failed"
                 attempt.safe_error_type = "RunTerminated"
                 attempt.safe_error_code = reason_code
@@ -856,6 +962,101 @@ class BenchmarkCallLedger:
         db.commit()
         db.refresh(run)
         return run
+
+    @staticmethod
+    def _release_reserved_cost(
+        db: Session, run_id: UUID, reserved_cost: float | None
+    ) -> None:
+        if reserved_cost is None:
+            return
+        changed = cast(
+            CursorResult[Any],
+            db.execute(
+                update(BenchmarkExperimentRun)
+                .where(
+                    BenchmarkExperimentRun.id == run_id,
+                    BenchmarkExperimentRun.reserved_spend >= reserved_cost,
+                )
+                .values(
+                    reserved_spend=BenchmarkExperimentRun.reserved_spend
+                    - reserved_cost
+                )
+            ),
+        )
+        if changed.rowcount != 1:
+            db.rollback()
+            raise LedgerError(
+                "inconsistent_monetary_reservation",
+                "Reserved monetary amount is inconsistent with the experiment run",
+            )
+
+    @staticmethod
+    def _settle_reserved_cost(
+        db: Session,
+        attempt: BenchmarkProviderCallAttempt,
+        run: BenchmarkExperimentRun,
+        actual_cost: float | None,
+        actual_currency: str | None,
+    ) -> tuple[float | None, str | None]:
+        reserved_cost = attempt.cost_estimate
+        if actual_cost is None and reserved_cost is None:
+            return None, None
+        settled_cost = reserved_cost if actual_cost is None else actual_cost
+        settled_currency = (
+            actual_currency
+            if actual_cost is not None
+            else attempt.currency
+        )
+        if settled_currency != run.budget_currency:
+            db.rollback()
+            raise LedgerError("currency_mismatch", "Attempt currency differs from run budget")
+        if reserved_cost is not None and settled_cost is not None:
+            if settled_cost > reserved_cost:
+                db.rollback()
+                raise LedgerError(
+                    "actual_cost_exceeds_reservation",
+                    "Settled cost exceeds its pre-call monetary reservation",
+                )
+        if run.max_spend is None:
+            db.rollback()
+            raise LedgerError(
+                "monetary_budget_not_configured",
+                "Monetary budget not configured for this experiment run",
+            )
+        release_cost = reserved_cost or 0.0
+        charge_cost = settled_cost or 0.0
+        changed = cast(
+            CursorResult[Any],
+            db.execute(
+                update(BenchmarkExperimentRun)
+                .where(
+                    BenchmarkExperimentRun.id == run.id,
+                    BenchmarkExperimentRun.reserved_spend >= release_cost,
+                    or_(
+                        BenchmarkExperimentRun.max_spend.is_(None),
+                        BenchmarkExperimentRun.spent_amount
+                        + BenchmarkExperimentRun.reserved_spend
+                        - release_cost
+                        + charge_cost
+                        <= BenchmarkExperimentRun.max_spend,
+                    ),
+                )
+                .values(
+                    reserved_spend=(
+                        BenchmarkExperimentRun.reserved_spend - release_cost
+                    ),
+                    spent_amount=BenchmarkExperimentRun.spent_amount + charge_cost,
+                    spent_currency=settled_currency,
+                )
+            ),
+        )
+        if changed.rowcount != 1:
+            db.rollback()
+            raise LedgerError(
+                "monetary_budget_exhausted",
+                "Settled cost exceeds the authorized monetary budget",
+            )
+        return settled_cost, settled_currency
 
     @staticmethod
     def _require_run(db: Session, run_id: UUID) -> BenchmarkExperimentRun:

@@ -106,6 +106,8 @@ def declaration(
     protocol_hash: str | None = None,
     dataset_hash: str | None = None,
     condition: str | None = None,
+    estimated_cost: float | None = None,
+    currency: str | None = None,
 ) -> ReservationDeclaration:
     assignments = {
         "analysis": value.providers.analysis,
@@ -121,23 +123,28 @@ def declaration(
         if role == "target_execution"
         else canonical_artifact_sha256({})
     )
-    return ReservationDeclaration(
-        stable_unit_id="synthetic-planning-workshop-v1:planning-launch-001:r1",
-        fixture_id="synthetic-planning-workshop-v1",
-        task_id="planning-launch-001",
-        repetition=1,
-        provider_role=role,
-        target_condition=(condition or "baseline") if role == "target_execution" else None,
-        idempotency_key=key,
-        configured_provider=provider or assignment.provider,
-        configured_model=model or assignment.model,
-        generation_parameter_sha256=parameter_hash or expected_parameter_hash,
-        request_artifact_sha256=canonical_artifact_sha256(
+    data = {
+        "stable_unit_id": "synthetic-planning-workshop-v1:planning-launch-001:r1",
+        "fixture_id": "synthetic-planning-workshop-v1",
+        "task_id": "planning-launch-001",
+        "repetition": 1,
+        "provider_role": role,
+        "target_condition": (condition or "baseline") if role == "target_execution" else None,
+        "idempotency_key": key,
+        "configured_provider": provider or assignment.provider,
+        "configured_model": model or assignment.model,
+        "generation_parameter_sha256": parameter_hash or expected_parameter_hash,
+        "request_artifact_sha256": canonical_artifact_sha256(
             {"safe_test_artifact": request_marker or key}
         ),
-        protocol_sha256=protocol_hash or protocol_sha256(value),
-        dataset_sha256=dataset_hash or value.dataset_sha256,
-    )
+        "protocol_sha256": protocol_hash or protocol_sha256(value),
+        "dataset_sha256": dataset_hash or value.dataset_sha256,
+    }
+    if estimated_cost is not None:
+        data["estimated_cost"] = estimated_cost
+    if currency is not None:
+        data["currency"] = currency
+    return ReservationDeclaration(**data)
 
 
 def test_migration_and_orm_tables_apply_with_required_constraints(client) -> None:
@@ -446,8 +453,12 @@ def test_attempt_lifecycle_usage_cost_cancel_and_snapshot(client, db_session) ->
     value = LiveStudyProtocol.model_validate(data)
     run = running_run(db_session, client, value)
     succeeded = BenchmarkCallLedger.reserve_call(
-        db_session, run.id, declaration(value, key="success")
+        db_session, run.id, declaration(value, key="success", estimated_cost=0.01, currency="USD")
     )
+    reserved_snapshot = BenchmarkCallLedger.budget_snapshot(db_session, run.id)
+    assert reserved_snapshot.spent_amount == 0
+    assert reserved_snapshot.remaining_spend == pytest.approx(9.99)
+    assert db_session.get(BenchmarkExperimentRun, run.id).reserved_spend == pytest.approx(0.01)
     BenchmarkCallLedger.mark_started(db_session, succeeded.id)
     succeeded = BenchmarkCallLedger.mark_succeeded(
         db_session,
@@ -462,15 +473,53 @@ def test_attempt_lifecycle_usage_cost_cancel_and_snapshot(client, db_session) ->
         ),
     )
     assert succeeded.status == "succeeded" and succeeded.total_tokens == 5
+    settled_snapshot = BenchmarkCallLedger.budget_snapshot(db_session, run.id)
+    assert settled_snapshot.spent_amount == pytest.approx(0.01)
+    assert settled_snapshot.remaining_spend == pytest.approx(9.99)
+    assert db_session.get(BenchmarkExperimentRun, run.id).reserved_spend == 0
 
     cancelled = BenchmarkCallLedger.reserve_call(
-        db_session, run.id, declaration(value, key="cancel")
+        db_session,
+        run.id,
+        declaration(value, key="cancel", estimated_cost=0.02, currency="USD"),
     )
     BenchmarkCallLedger.cancel_reservation(db_session, cancelled.id)
     snapshot = BenchmarkCallLedger.budget_snapshot(db_session, run.id)
     assert snapshot.reserved == 0
     assert snapshot.succeeded == 1 and snapshot.cancelled == 1
     assert snapshot.consumed_by_role.analysis == 1
+    assert snapshot.spent_amount == pytest.approx(0.01)
+    assert snapshot.remaining_spend == pytest.approx(9.99)
+    assert db_session.get(BenchmarkExperimentRun, run.id).reserved_spend == 0
+
+
+def test_failed_started_call_conservatively_settles_reserved_cost(client, db_session) -> None:
+    value = protocol()
+    data = value.model_dump(mode="python")
+    data["monetary_budget"] = {
+        "currency": "USD",
+        "maximum_cost": 10,
+        "pricing_snapshot_reference": "unverified-unit-test://pricing",
+    }
+    value = LiveStudyProtocol.model_validate(data)
+    run = running_run(db_session, client, value)
+    attempt = BenchmarkCallLedger.reserve_call(
+        db_session,
+        run.id,
+        declaration(value, key="failed-cost", estimated_cost=0.25, currency="USD"),
+    )
+    BenchmarkCallLedger.mark_started(db_session, attempt.id)
+    BenchmarkCallLedger.mark_failed_from_exception(
+        db_session,
+        attempt.id,
+        RuntimeError("offline test failure"),
+        safe_error_code="provider_unavailable",
+    )
+
+    snapshot = BenchmarkCallLedger.budget_snapshot(db_session, run.id)
+    assert snapshot.spent_amount == pytest.approx(0.25)
+    assert snapshot.remaining_spend == pytest.approx(9.75)
+    assert db_session.get(BenchmarkExperimentRun, run.id).reserved_spend == 0
 
 
 def test_invalid_transitions_terminal_runs_and_finalize_consistency(client, db_session) -> None:
