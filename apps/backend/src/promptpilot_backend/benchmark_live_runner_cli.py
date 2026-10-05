@@ -6,6 +6,11 @@ This CLI provides safe operations for the guarded live runner:
 - stage: Stage an experiment run (requires admission)
 - inspect: Inspect a staged run's budget and status
 - launch-gate: Evaluate the fail-closed launch gate
+- validate-study: Evaluate the study-preparation readiness checklist
+- inspect-study: Inspect the canonical, content-addressed study configuration
+- validate-fixtures: Validate every selected fixture manifest offline
+- validate-pricing: Validate the offline, hash-pinned pricing snapshot
+- stage-study: Rehearse the complete preparation/staging workflow offline
 
 The live-run operation is deliberately NOT exposed via this CLI. Live
 execution requires a launch-gate report carrying ``ready = true``,
@@ -48,6 +53,12 @@ from .benchmark_fixtures import (
 )
 from .benchmark_pricing import PricingSnapshotError, load_pricing_snapshot
 from .benchmark_provider_adapter import live_provider_configuration_matches
+from .benchmark_study_preparation import (
+    StudyPreparationError,
+    build_study_configuration,
+    evaluate_study_readiness,
+    rehearse_study_preparation,
+)
 from .db import SessionLocal
 from .production_benchmark_protocol import (
     LiveStudyProtocol,
@@ -326,6 +337,207 @@ def cmd_launch_gate(args: argparse.Namespace) -> int:
         return 1
 
 
+def _load_study_inputs(
+    protocol_path: Path, dataset_path: Path
+) -> tuple[LiveStudyProtocol, Any, Path]:
+    """Load the protocol, dataset, and fixtures directory for a study."""
+
+    protocol = load_protocol(protocol_path)
+    dataset = load_dataset(dataset_path)
+    return protocol, dataset, protocol_path.parent
+
+
+def cmd_validate_study(args: argparse.Namespace) -> int:
+    """Evaluate the study-preparation readiness checklist."""
+    try:
+        protocol_path = Path(args.protocol)
+        protocol, dataset, fixtures_dir = _load_study_inputs(
+            protocol_path, Path(args.dataset)
+        )
+        manifests = load_manifests(protocol, fixtures_dir, dataset)
+        manifest_map = {fixture_id: manifest for fixture_id, (manifest, _) in manifests.items()}
+        timeout_seconds = (
+            float(args.timeout) if args.timeout is not None else None
+        )
+        pricing_snapshot = None
+        if args.pricing_snapshot:
+            pricing_snapshot = load_pricing_snapshot(args.pricing_snapshot, protocol)
+        authorization = None
+        if args.authorization:
+            authorization = parse_authorization(
+                json.loads(Path(args.authorization).read_text(encoding="utf-8"))
+            )
+        report = evaluate_study_readiness(
+            protocol=protocol,
+            dataset=dataset,
+            protocol_path=protocol_path,
+            manifests=manifest_map,
+            target_timeout_seconds=timeout_seconds,
+            pricing_snapshot=pricing_snapshot,
+            authorization=authorization,
+        )
+        print(json.dumps(report.model_dump(mode="json"), indent=2, sort_keys=True))
+        return 0 if report.technical_ready else 1
+    except StudyPreparationError as e:
+        print(f"Study validation failed [{e.code}]: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Study validation failed: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_inspect_study(args: argparse.Namespace) -> int:
+    """Inspect the canonical, content-addressed study configuration."""
+    try:
+        protocol_path = Path(args.protocol)
+        protocol, dataset, fixtures_dir = _load_study_inputs(
+            protocol_path, Path(args.dataset)
+        )
+        manifests = load_manifests(protocol, fixtures_dir, dataset)
+        manifest_map = {fixture_id: manifest for fixture_id, (manifest, _) in manifests.items()}
+        timeout_seconds = (
+            float(args.timeout) if args.timeout is not None else None
+        )
+        pricing_snapshot = None
+        if args.pricing_snapshot:
+            pricing_snapshot = load_pricing_snapshot(args.pricing_snapshot, protocol)
+        configuration = build_study_configuration(
+            protocol,
+            dataset,
+            manifest_map,
+            protocol_path=protocol_path,
+            target_timeout_seconds=timeout_seconds,
+            pricing_snapshot=pricing_snapshot,
+        )
+        payload = configuration.model_dump(mode="json")
+        payload["configuration_sha256"] = configuration.configuration_sha256
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        if args.output:
+            output_path = Path(args.output)
+            output_path.write_text(
+                json.dumps(payload, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            print(f"Configuration written to {output_path}")
+        return 0
+    except StudyPreparationError as e:
+        print(f"Study inspection failed [{e.code}]: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Study inspection failed: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_validate_fixtures(args: argparse.Namespace) -> int:
+    """Validate every selected fixture manifest offline."""
+    try:
+        protocol_path = Path(args.protocol)
+        protocol, dataset, fixtures_dir = _load_study_inputs(
+            protocol_path, Path(args.dataset)
+        )
+        results = []
+        all_valid = True
+        for selection in protocol.selected_fixtures:
+            manifest_path = fixtures_dir / selection.manifest_path
+            entry: dict[str, Any] = {
+                "fixture_id": selection.fixture_id,
+                "manifest_path": str(manifest_path),
+            }
+            try:
+                manifest = load_fixture_manifest(manifest_path, dataset)
+                entry["valid"] = True
+                entry["live_eligible"] = manifest.live_eligible
+                entry["fixture_kind"] = manifest.fixture_kind
+                entry["review_status"] = manifest.review.status
+                entry["task_id"] = manifest.task_id
+                entry["manifest_sha256"] = manifest_sha256(manifest)
+                entry["hash_matches_protocol"] = (
+                    manifest_sha256(manifest) == selection.manifest_sha256
+                )
+                if not entry["hash_matches_protocol"]:
+                    all_valid = False
+            except (OSError, ValueError) as e:
+                entry["valid"] = False
+                entry["error"] = str(e)
+                all_valid = False
+            results.append(entry)
+        payload = {
+            "protocol_id": protocol.protocol_id,
+            "fixture_count": len(results),
+            "all_valid": all_valid,
+            "fixtures": results,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if all_valid else 1
+    except Exception as e:
+        print(f"Fixture validation failed: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_validate_pricing(args: argparse.Namespace) -> int:
+    """Validate the offline, hash-pinned pricing snapshot."""
+    try:
+        protocol_path = Path(args.protocol)
+        protocol, dataset, _ = _load_study_inputs(
+            protocol_path, Path(args.dataset)
+        )
+        snapshot = load_pricing_snapshot(args.pricing_snapshot, protocol)
+        payload = {
+            "valid": True,
+            "schema_version": snapshot.schema_version,
+            "source_reference": snapshot.source_reference,
+            "captured_at": snapshot.captured_at.isoformat(),
+            "valid_until": snapshot.valid_until.isoformat(),
+            "currency": snapshot.currency,
+            "pricing_basis": snapshot.pricing_basis,
+            "model_count": len(snapshot.models),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    except PricingSnapshotError as e:
+        print(f"Pricing snapshot invalid [{e.code}]: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Pricing snapshot validation failed: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_stage_study(args: argparse.Namespace) -> int:
+    """Rehearse the complete preparation/staging workflow offline."""
+    try:
+        protocol_path = Path(args.protocol)
+        protocol, dataset, fixtures_dir = _load_study_inputs(
+            protocol_path, Path(args.dataset)
+        )
+        manifests = load_manifests(protocol, fixtures_dir, dataset)
+        manifest_map = {fixture_id: manifest for fixture_id, (manifest, _) in manifests.items()}
+        timeout_seconds = (
+            float(args.timeout) if args.timeout is not None else None
+        )
+        rehearsal = rehearse_study_preparation(
+            protocol=protocol,
+            dataset=dataset,
+            protocol_path=protocol_path,
+            manifests=manifest_map,
+            target_timeout_seconds=timeout_seconds,
+        )
+        print(json.dumps(rehearsal, indent=2, sort_keys=True))
+        if args.output:
+            output_path = Path(args.output)
+            output_path.write_text(
+                json.dumps(rehearsal, indent=2, sort_keys=True),
+                encoding="utf-8",
+            )
+            print(f"Rehearsal written to {output_path}")
+        return 0
+    except StudyPreparationError as e:
+        print(f"Study rehearsal failed [{e.code}]: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Study rehearsal failed: {e}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="PromptPilot Guarded Live Runner CLI",
@@ -358,6 +570,37 @@ Examples:
     --dataset benchmark_dataset.json \\
     --pricing-snapshot pricing-snapshot.json \\
     --authorization auth.json
+
+  # Evaluate the study-preparation readiness checklist
+  python -m promptpilot_backend.benchmark_live_runner_cli validate-study \\
+    --protocol fixtures/production_pipeline/synthetic_protocol.json \\
+    --dataset benchmark_dataset.json \\
+    --timeout 30 \\
+    --pricing-snapshot pricing-snapshot.json \\
+    --authorization auth.json
+
+  # Inspect the canonical study configuration
+  python -m promptpilot_backend.benchmark_live_runner_cli inspect-study \\
+    --protocol fixtures/production_pipeline/synthetic_protocol.json \\
+    --dataset benchmark_dataset.json \\
+    --timeout 30
+
+  # Validate every selected fixture manifest offline
+  python -m promptpilot_backend.benchmark_live_runner_cli validate-fixtures \\
+    --protocol fixtures/production_pipeline/synthetic_protocol.json \\
+    --dataset benchmark_dataset.json
+
+  # Validate the offline, hash-pinned pricing snapshot
+  python -m promptpilot_backend.benchmark_live_runner_cli validate-pricing \\
+    --protocol fixtures/production_pipeline/synthetic_protocol.json \\
+    --dataset benchmark_dataset.json \\
+    --pricing-snapshot pricing-snapshot.json
+
+  # Rehearse the complete preparation/staging workflow offline
+  python -m promptpilot_backend.benchmark_live_runner_cli stage-study \\
+    --protocol fixtures/production_pipeline/synthetic_protocol.json \\
+    --dataset benchmark_dataset.json \\
+    --timeout 30
         """,
     )
 
@@ -399,6 +642,83 @@ Examples:
         help="Path to the offline, hash-pinned provider pricing snapshot JSON",
     )
     launch_gate_parser.set_defaults(func=cmd_launch_gate)
+
+    # Validate study command
+    validate_study_parser = subparsers.add_parser(
+        "validate-study",
+        help="Evaluate the study-preparation readiness checklist",
+    )
+    validate_study_parser.add_argument("--protocol", required=True, help="Path to protocol JSON")
+    validate_study_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
+    validate_study_parser.add_argument(
+        "--timeout",
+        type=float,
+        help="Target timeout in seconds (a required human decision; no default)",
+    )
+    validate_study_parser.add_argument(
+        "--pricing-snapshot",
+        help="Path to the offline, hash-pinned provider pricing snapshot JSON",
+    )
+    validate_study_parser.add_argument(
+        "--authorization",
+        help="Path to the external launch authorization JSON",
+    )
+    validate_study_parser.set_defaults(func=cmd_validate_study)
+
+    # Inspect study command
+    inspect_study_parser = subparsers.add_parser(
+        "inspect-study",
+        help="Inspect the canonical, content-addressed study configuration",
+    )
+    inspect_study_parser.add_argument("--protocol", required=True, help="Path to protocol JSON")
+    inspect_study_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
+    inspect_study_parser.add_argument(
+        "--timeout",
+        type=float,
+        help="Target timeout in seconds (a required human decision; no default)",
+    )
+    inspect_study_parser.add_argument(
+        "--pricing-snapshot",
+        help="Path to the offline, hash-pinned provider pricing snapshot JSON",
+    )
+    inspect_study_parser.add_argument("--output", help="Output file for configuration JSON")
+    inspect_study_parser.set_defaults(func=cmd_inspect_study)
+
+    # Validate fixtures command
+    validate_fixtures_parser = subparsers.add_parser(
+        "validate-fixtures",
+        help="Validate every selected fixture manifest offline",
+    )
+    validate_fixtures_parser.add_argument("--protocol", required=True, help="Path to protocol JSON")
+    validate_fixtures_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
+    validate_fixtures_parser.set_defaults(func=cmd_validate_fixtures)
+
+    # Validate pricing command
+    validate_pricing_parser = subparsers.add_parser(
+        "validate-pricing",
+        help="Validate the offline, hash-pinned provider pricing snapshot",
+    )
+    validate_pricing_parser.add_argument("--protocol", required=True, help="Path to protocol JSON")
+    validate_pricing_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
+    validate_pricing_parser.add_argument(
+        "--pricing-snapshot", required=True, help="Path to the pricing snapshot JSON"
+    )
+    validate_pricing_parser.set_defaults(func=cmd_validate_pricing)
+
+    # Stage study command
+    stage_study_parser = subparsers.add_parser(
+        "stage-study",
+        help="Rehearse the complete preparation/staging workflow offline",
+    )
+    stage_study_parser.add_argument("--protocol", required=True, help="Path to protocol JSON")
+    stage_study_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
+    stage_study_parser.add_argument(
+        "--timeout",
+        type=float,
+        help="Target timeout in seconds (a required human decision; no default)",
+    )
+    stage_study_parser.add_argument("--output", help="Output file for rehearsal JSON")
+    stage_study_parser.set_defaults(func=cmd_stage_study)
 
     args = parser.parse_args()
     func: Callable[[argparse.Namespace], int] = args.func
