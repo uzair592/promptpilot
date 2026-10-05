@@ -31,9 +31,7 @@ def authorized_session(db: Session, conversation_id: UUID, user: User) -> Questi
     conversation, project, _ = conversation_access(db, conversation_id, user, ProjectRole.MEMBER)
     session = db.scalar(
         select(QuestionSession)
-        .where(
-            QuestionSession.conversation_id == conversation.id, QuestionSession.status == "active"
-        )
+        .where(QuestionSession.conversation_id == conversation.id)
         .order_by(QuestionSession.created_at.desc())
     )
     if session is None:
@@ -68,6 +66,8 @@ def submit_answer(
     db: Session = Depends(get_db),
 ) -> QuestionSessionResponse:
     session = authorized_session(db, conversation_id, user)
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail="Question session is already complete")
     question = db.scalar(
         select(Question).where(Question.id == question_id, Question.session_id == session.id)
     )
@@ -98,11 +98,13 @@ def skip_question(
     db: Session = Depends(get_db),
 ) -> QuestionSessionResponse:
     session = authorized_session(db, conversation_id, user)
+    if session.status != "active":
+        raise HTTPException(status_code=409, detail="Question session is already complete")
     question = db.scalar(
         select(Question).where(Question.id == question_id, Question.session_id == session.id)
     )
-    if question is None:
-        raise HTTPException(status_code=404, detail="Question not found")
+    if question is None or question.status != "presented":
+        raise HTTPException(status_code=404, detail="Question not found or no longer skippable")
     next_item = skip_and_next_question(db, session, question)
     return QuestionSessionResponse(
         id=session.id,

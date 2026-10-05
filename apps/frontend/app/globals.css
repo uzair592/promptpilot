@@ -14,6 +14,18 @@ button,
 input {
   font: inherit;
 }
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 3px solid #8eb2ff;
+  outline-offset: 2px;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 textarea,
 select {
   font: inherit;
@@ -114,7 +126,7 @@ button.secondary {
   overflow: auto;
 }
 .project-page {
-  max-width: 1100px;
+  max-width: 1240px;
   margin: 0 auto;
 }
 .project-header {
@@ -151,6 +163,315 @@ button.secondary {
   display: flex;
   flex-direction: column;
   padding: 24px;
+}
+.workflow-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  min-height: 610px;
+  background: white;
+  border: 1px solid #dce2ec;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgb(22 32 51 / 6%);
+}
+.workflow-main {
+  min-width: 0;
+  padding: 20px 24px 28px;
+}
+.workflow-heading,
+.stage-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+.workflow-heading h2,
+.stage-title h2 {
+  margin: 4px 0;
+}
+.eyebrow {
+  color: #5e6a7d;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.save-state {
+  color: #24633b;
+  background: #e9f7ee;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.stage-nav {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 14px 0 18px;
+  border-bottom: 1px solid #e4e8ef;
+}
+.stage-nav button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  background: transparent;
+  color: #526074;
+  padding: 8px;
+  font-size: 13px;
+}
+.stage-nav button span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e9edf4;
+}
+.stage-nav button.active {
+  color: #173f9c;
+  background: #eef3ff;
+}
+.stage-nav button.active span {
+  color: white;
+  background: #2457c5;
+}
+.stage-content {
+  padding-top: 20px;
+}
+.stage-title {
+  margin-bottom: 18px;
+}
+.stage-title p {
+  margin: 4px 0 0;
+}
+.request-card,
+.question-card,
+.detail-card,
+.gap-card,
+.evidence-item,
+.run-card,
+.context-item,
+.score-card,
+.evaluation {
+  border: 1px solid #dce2ec;
+  border-radius: 9px;
+  padding: 16px;
+  background: #fff;
+}
+.request-card {
+  border-left: 4px solid #2457c5;
+  background: #f7f9fd;
+}
+.request-card p,
+.prompt-compare p,
+.run-card p {
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+.grow {
+  flex: 1;
+}
+.composer label {
+  font-size: 14px;
+}
+.workspace-loading {
+  padding: 48px;
+  color: #5e6a7d;
+  text-align: center;
+}
+.score-card {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: #f7f9fd;
+}
+.score-card button {
+  margin-left: auto;
+}
+.score {
+  font-size: 38px;
+  font-weight: 800;
+  color: #173f9c;
+}
+.score small {
+  font-size: 14px;
+}
+.analysis-grid,
+.evidence-grid,
+.context-columns,
+.run-grid,
+.prompt-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.detail-card p,
+.gap-card p,
+.evidence-item p {
+  margin: 8px 0;
+  line-height: 1.45;
+}
+.gap-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 8px 0;
+}
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  background: #e9edf4;
+  color: #455266;
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.badge.critical,
+.badge.failed {
+  background: #fde9e9;
+  color: #9b2020;
+}
+.badge.important,
+.badge.processing,
+.warning-note {
+  background: #fff4dc;
+  color: #795313;
+}
+.badge.completed,
+.badge.processed,
+.success-note {
+  background: #e9f7ee;
+  color: #24633b;
+}
+.empty-note,
+.success-note,
+.warning-note {
+  border: 1px dashed #bbc5d4;
+  border-radius: 8px;
+  padding: 16px;
+}
+.success-note {
+  border-color: #9bd0ad;
+}
+.question-card {
+  max-width: 720px;
+}
+.button-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.evidence-grid > div {
+  min-width: 0;
+}
+.evidence-item {
+  margin-bottom: 10px;
+}
+.evidence-actions {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e4e8ef;
+}
+.evidence-actions input[type="url"] {
+  flex: 1;
+}
+.truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.error-inline {
+  color: #a52828;
+}
+.budget {
+  position: relative;
+  height: 30px;
+  background: #edf1f7;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.budget > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #bed0f6;
+}
+.budget small {
+  position: relative;
+  display: block;
+  padding: 7px 10px;
+}
+.context-item {
+  padding: 12px;
+  margin: 8px 0;
+}
+.context-item p {
+  margin-top: 0;
+}
+.prompt-compare article {
+  border: 1px solid #dce2ec;
+  border-radius: 9px;
+  padding: 18px;
+  background: #f7f9fd;
+}
+.prompt-compare article.generated {
+  background: #f1f6ff;
+  border-color: #9db7ec;
+}
+.text-button {
+  background: transparent;
+  color: #2457c5;
+  padding: 3px;
+}
+.metadata-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.metadata-row span {
+  background: #edf1f7;
+  border-radius: 5px;
+  padding: 6px 9px;
+  font-size: 13px;
+}
+.run-card button {
+  margin-top: 12px;
+}
+.score-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.score-row > div {
+  display: grid;
+  gap: 4px;
+  background: #f7f9fd;
+  padding: 14px;
+  border-radius: 8px;
+}
+.score-row strong {
+  font-size: 24px;
+}
+.dimension-table {
+  margin-top: 16px;
+  border-top: 1px solid #dce2ec;
+}
+.dimension-row {
+  display: grid;
+  grid-template-columns: 180px 70px 70px 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e4e8ef;
+  align-items: start;
+}
+details {
+  margin-top: 14px;
+}
+summary {
+  cursor: pointer;
+  font-weight: 700;
 }
 .message-list {
   display: grid;
@@ -214,6 +535,29 @@ button.secondary {
   }
   .conversation-shell {
     grid-template-columns: 1fr;
+  }
+  .workflow-shell {
+    grid-template-columns: 1fr;
+  }
+  .workflow-main {
+    padding: 18px;
+  }
+  .analysis-grid,
+  .evidence-grid,
+  .context-columns,
+  .run-grid,
+  .prompt-compare,
+  .evidence-actions {
+    grid-template-columns: 1fr;
+  }
+  .stage-title {
+    flex-direction: column;
+  }
+  .dimension-row {
+    grid-template-columns: 1fr 50px 50px;
+  }
+  .dimension-row small {
+    grid-column: 1 / -1;
   }
   .conversation-sidebar {
     border-right: 0;
