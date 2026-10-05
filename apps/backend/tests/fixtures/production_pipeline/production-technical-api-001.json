@@ -1,0 +1,29 @@
+{
+  "clarification_answers": [],
+  "dataset_name": "promptpilot-experimental-v1",
+  "dataset_sha256": "8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d",
+  "evaluation_only": [],
+  "fixture_id": "production-technical-api-001",
+  "fixture_kind": "experimental_candidate",
+  "frozen_documents": [],
+  "original_task": {
+    "content": "Design a small REST endpoint for creating a project member invitation.",
+    "content_sha256": "5f63c9a0fb4be20d3d6755e687f6081fbead3b91157cae0b44b9c7c267589ebf",
+    "fixture_id": "original-task",
+    "provenance": {
+      "description": "Exact task_text from the canonical benchmark dataset",
+      "source_id": "dataset:technical-api-001",
+      "source_type": "dataset_original"
+    },
+    "source_type": "dataset_original",
+    "task_id": "technical-api-001"
+  },
+  "project_facts": [],
+  "review": {
+    "reviewed_at": null,
+    "reviewer_id": null,
+    "status": "pending"
+  },
+  "schema_version": "v1",
+  "task_id": "technical-api-001"
+}

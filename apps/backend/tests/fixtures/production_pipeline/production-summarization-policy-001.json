@@ -1,0 +1,29 @@
+{
+  "clarification_answers": [],
+  "dataset_name": "promptpilot-experimental-v1",
+  "dataset_sha256": "8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d",
+  "evaluation_only": [],
+  "fixture_id": "production-summarization-policy-001",
+  "fixture_kind": "experimental_candidate",
+  "frozen_documents": [],
+  "original_task": {
+    "content": "Summarize this workplace policy for a new employee: Staff must report a workplace safety incident to their supervisor before the end of their shift. If the supervisor is unavailable, staff must contact the duty manager. The report should include the time, location, people involved, and immediate actions taken. Staff must not share personal details outside the reporting chain.",
+    "content_sha256": "32a3c14e3e8209d09a8f364e4b18c1924d3e1e1cdb93c444c13567f945d1c909",
+    "fixture_id": "original-task",
+    "provenance": {
+      "description": "Exact task_text from the canonical benchmark dataset",
+      "source_id": "dataset:summarization-policy-001",
+      "source_type": "dataset_original"
+    },
+    "source_type": "dataset_original",
+    "task_id": "summarization-policy-001"
+  },
+  "project_facts": [],
+  "review": {
+    "reviewed_at": null,
+    "reviewer_id": null,
+    "status": "pending"
+  },
+  "schema_version": "v1",
+  "task_id": "summarization-policy-001"
+}

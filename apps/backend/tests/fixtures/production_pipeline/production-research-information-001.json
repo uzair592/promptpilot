@@ -1,0 +1,29 @@
+{
+  "clarification_answers": [],
+  "dataset_name": "promptpilot-experimental-v1",
+  "dataset_sha256": "8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d",
+  "evaluation_only": [],
+  "fixture_id": "production-research-information-001",
+  "fixture_kind": "experimental_candidate",
+  "frozen_documents": [],
+  "original_task": {
+    "content": "Propose a careful research approach for investigating whether a new onboarding guide improves task completion.",
+    "content_sha256": "f8a52a151fc280afa128dfc4b6ba91cd8cfb78d510bda4d4dd619a1b98fe2574",
+    "fixture_id": "original-task",
+    "provenance": {
+      "description": "Exact task_text from the canonical benchmark dataset",
+      "source_id": "dataset:research-information-001",
+      "source_type": "dataset_original"
+    },
+    "source_type": "dataset_original",
+    "task_id": "research-information-001"
+  },
+  "project_facts": [],
+  "review": {
+    "reviewed_at": null,
+    "reviewer_id": null,
+    "status": "pending"
+  },
+  "schema_version": "v1",
+  "task_id": "research-information-001"
+}
