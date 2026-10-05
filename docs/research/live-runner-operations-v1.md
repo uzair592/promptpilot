@@ -43,7 +43,8 @@ been run.
 | Provider adapter boundary | `benchmark_provider_adapter.py` | Separates offline fixture adapters from the live `OpenAICompatibleProvider` adapter. |
 | Results and export contract | `benchmark_experiment_results.py` | Immutable per-unit provenance, four explicit dispositions, score-free blinded review samples separated from human review records, export plus `ExportLock`. |
 | Analysis and dry-run planning | `benchmark_experiment_analysis.py` | Deterministic aggregation over frozen strata and the offline workload plan. |
-| Operational CLI | `benchmark_live_runner_cli.py` | `validate`, `dry-run`, `stage`, `inspect`, and `launch-gate`. No `run` command. |
+| Study preparation and readiness | `benchmark_study_preparation.py` | The deterministic human-input checklist, the canonical content-addressed study configuration, and the offline preparation/staging rehearsal. Never manufactures a human decision. |
+| Operational CLI | `benchmark_live_runner_cli.py` | `validate`, `dry-run`, `stage`, `inspect`, `launch-gate`, `validate-study`, `inspect-study`, `validate-fixtures`, `validate-pricing`, and `stage-study`. No `run` command. |
 
 ## Execution modes
 
@@ -92,7 +93,9 @@ Both conditions resolve to one identical parameter set, or
 Target provider, target model, `max_tokens`, `timeout`, provider
 authorization, spending authorization, genuine fixture review and
 admission, and external human approval. Software supplies none of
-these and must not guess any of them.
+these and must not guess any of them. The readiness checklist
+reports each as a machine-readable blocker when it is absent; it
+never fills in a value.
 
 ## Launch sequence
 
@@ -222,6 +225,76 @@ the report still claims readiness.
 The dry run cannot accept a real provider instance: the engine rejects anything
 without `offline_fixture = True` and rejects `OpenAICompatibleProvider` by type.
 
+## Study preparation and admission readiness
+
+`benchmark_study_preparation.py` implements the preparation milestone. It
+never executes the study, never contacts a provider, never spends credits,
+and never manufactures a human decision. It validates human-supplied
+declarations and reports exactly what is still missing.
+
+### Readiness checklist
+
+`evaluate_study_readiness` returns a `StudyReadinessReport` that separates
+what software can verify from what only a human can decide:
+
+| Field | Meaning |
+|---|---|
+| `technical_ready` | Every software-verifiable check passed. |
+| `human_approval` | Always `false` here; software cannot verify human approval. |
+| `authorized` | Always `false` here; software cannot verify authorization. |
+| `live_execution_ready` | Always `false`; software can never authorize a live run. |
+
+The report carries a machine-readable `checks` list (one named question
+with a ready/not-ready answer) and a `blockers` list (one machine-readable
+reason per failure). The `software_verification_limit` field states that the
+authenticity of any reviewer, issuer, signature, consent, or authorization
+remains an unverified claim requiring out-of-band human confirmation.
+
+The checklist verifies, in order: protocol locked, dataset identity, the
+frozen 8-fixture / R=3 / Q=2 shape, every fixture hash current and
+live-eligible, every fixture carries human review evidence, both conditions
+resolve to one identical frozen parameter set, `max_tokens` chosen,
+`timeout` chosen, every frozen provider role assigned, a fresh hash-pinned
+pricing snapshot covers every role, a monetary budget with a maximum spend
+and currency is configured, provider/spending/external-human authorization
+supplied, technical admission ready, and the launch gate technically
+capable of passing.
+
+### Canonical study configuration
+
+`build_study_configuration` produces a `StudyConfiguration`: a single
+content-addressed artifact that binds the protocol SHA-256, dataset
+SHA-256, all 8 fixture SHA-256s, the provider/model/judge assignments,
+the frozen target parameters, the chosen `timeout`, the question cap, the
+skip and fallback policies, the evaluator, the rubric version, the
+condition order, the repetitions, the monetary budget, the pricing
+snapshot reference, and the 168-call ceiling. The configuration is
+content-addressed by its own canonical SHA-256, so the study cannot be
+silently re-interpreted under a different configuration.
+
+### Offline rehearsal
+
+`rehearse_study_preparation` (CLI: `stage-study`) rehearses the complete
+preparation/staging workflow offline. It uses only the supplied
+declarations and the offline dry-run planner. It makes zero network
+calls, zero real provider calls, spends zero money, and never produces a
+live-eligible fixture or a human approval. It proves the staging machinery
+works without involving real infrastructure.
+
+### Study-preparation CLI
+
+| Command | Purpose |
+|---|---|
+| `validate-study` | Evaluate the readiness checklist; exit non-zero when blocked. |
+| `inspect-study` | Print (and optionally write) the canonical study configuration and its SHA-256. |
+| `validate-fixtures` | Validate every selected fixture manifest offline; report live-eligibility and hash match. |
+| `validate-pricing` | Validate the offline, hash-pinned provider pricing snapshot. |
+| `stage-study` | Rehearse the complete preparation/staging workflow offline (zero network, zero cost). |
+
+`max_tokens` and `timeout` are required human decisions with no default.
+`validate-study`, `inspect-study`, and `stage-study` fail closed when
+either is absent; the software never guesses a value.
+
 ## Budget enforcement
 
 The authoritative order is:
@@ -312,9 +385,13 @@ These are genuine human-controlled prerequisites, not engineering tasks:
 3. Select and confirm the target provider, model, `max_tokens`, and `timeout`.
 4. Obtain provider access authorization and spending authorization out of band.
 5. Lock the protocol and record its hash.
-6. Complete the human-controlled admission and supply a `ready = true`
+6. Use `validate-study` to confirm the readiness checklist has no
+   software-verifiable blockers, and `stage-study` to rehearse the
+   offline preparation/staging workflow. A clean rehearsal is not
+   authorization; it only proves the staging machinery works.
+7. Complete the human-controlled admission and supply a `ready = true`
    launch-gate report bound to the frozen protocol.
-7. Only then may a human-controlled process start `LiveExperimentRunner` in
+8. Only then may a human-controlled process start `LiveExperimentRunner` in
    `live` mode.
 
 ## Research status at this milestone
@@ -322,6 +399,9 @@ These are genuine human-controlled prerequisites, not engineering tasks:
 ```
 Benchmark infrastructure: IMPLEMENTED
 Benchmark safety/budget ledger: IMPLEMENTED AND OFFLINE-VALIDATED
+Study preparation and readiness checklist: IMPLEMENTED AND OFFLINE-VALIDATED
+Canonical study configuration artifact: IMPLEMENTED
+Offline preparation/staging rehearsal: IMPLEMENTED (zero network, zero cost)
 Controlled live pilot: NOT RUN
 Validated benchmark results: NOT ESTABLISHED
 General PromptPilot superiority claim: NOT MADE
