@@ -140,11 +140,14 @@ def test_checklist_reports_pending_template_as_blocked(tmp_path: Path) -> None:
     entry = by_id[production_fixture_id("writing-email-001")]
     assert entry.fixture_exists is True
     assert entry.task_matches_frozen_dataset is True
-    assert entry.provenance_supplied is True
+    assert entry.task_provenance_available is True
+    assert entry.production_fixture_evidence_supplied is False
     assert entry.reviewer_supplied is False
     assert entry.review_timestamp_supplied is False
     assert entry.review_status == "pending"
     assert entry.live_eligible is False
+    assert "production_fixture_evidence" in entry.missing_fields
+    assert "production_fixture_evidence_pending" in entry.blocker_codes
     assert "reviewer_id" in entry.missing_fields
     assert "reviewed_at" in entry.missing_fields
     assert "human_review_pending" in entry.blocker_codes
@@ -298,9 +301,12 @@ def test_incomplete_production_fixture_remains_blocked(tmp_path: Path) -> None:
     assert report.state == "blocked"
     assert report.live_eligibility == "blocked"
     assert report.human_review == "pending"
-    assert report.genuine_fixture_evidence == "supplied"
+    assert report.genuine_fixture_evidence == "pending"
     for entry in report.checklist:
         assert entry.live_eligible is False
+        assert entry.task_provenance_available is True
+        assert entry.production_fixture_evidence_supplied is False
+        assert "production_fixture_evidence_pending" in entry.blocker_codes
         assert "human_review_pending" in entry.blocker_codes
 
 
@@ -334,8 +340,154 @@ def test_complete_structurally_valid_fixture_requires_human_eligibility(
     for entry in report.checklist:
         assert entry.review_status == "human_approved"
         assert entry.live_eligible is True
+        assert entry.task_provenance_available is True
         assert entry.reviewer_supplied is True
         assert entry.review_timestamp_supplied is True
+    assert "unverified claim" in report.software_verification_limit
+    assert "never authorize live execution" in report.software_verification_limit
+
+
+def test_dataset_original_provenance_is_not_genuine_fixture_evidence(
+    tmp_path: Path,
+) -> None:
+    """A template with only ``dataset_original`` provenance stays pending.
+
+    ``dataset_original`` proves the frozen task came from the
+    canonical dataset. It does NOT prove a genuine production
+    fixture supplied project-specific context, user/project facts,
+    clarification answers, supporting documents, evaluation-only
+    information, or provenance/consent evidence. The canonical
+    dataset task is never counted as genuine production-fixture
+    evidence.
+    """
+
+    data = dataset()
+    _write_template(tmp_path, "writing-email-001")
+    manifests = load_production_fixtures(dataset=data, fixtures_dir=tmp_path)
+    checklist = build_fixture_checklist(dataset=data, manifests=manifests)
+    entry = next(
+        item for item in checklist
+        if item.fixture_id == production_fixture_id("writing-email-001")
+    )
+    assert entry.task_provenance_available is True
+    assert entry.production_fixture_evidence_supplied is False
+    assert "production_fixture_evidence" in entry.missing_fields
+    assert "production_fixture_evidence_pending" in entry.blocker_codes
+    report = build_intake_report(dataset=data, manifests=manifests)
+    assert report.genuine_fixture_evidence == "pending"
+
+
+def test_existing_eight_templates_remain_blocked(tmp_path: Path) -> None:
+    """The 8 current production templates remain blocked and ineligible."""
+
+    data = dataset()
+    for task in data.tasks:
+        _write_template(tmp_path, task.task_id)
+    manifests = load_production_fixtures(dataset=data, fixtures_dir=tmp_path)
+    report = build_intake_report(dataset=data, manifests=manifests)
+    assert report.state == "blocked"
+    assert report.genuine_fixture_evidence == "pending"
+    assert report.human_review == "pending"
+    assert report.live_eligibility == "blocked"
+    assert len(report.checklist) == FROZEN_TASK_COUNT
+    for entry in report.checklist:
+        assert entry.live_eligible is False
+        assert entry.production_fixture_evidence_supplied is False
+        assert entry.reviewer_supplied is False
+        assert entry.review_timestamp_supplied is False
+        assert entry.review_status == "pending"
+        assert "production_fixture_evidence_pending" in entry.blocker_codes
+        assert "human_review_pending" in entry.blocker_codes
+        assert "fixture_not_live_eligible" in entry.blocker_codes
+
+
+def test_human_review_still_pending_for_templates(tmp_path: Path) -> None:
+    data = dataset()
+    for task in data.tasks:
+        _write_template(tmp_path, task.task_id)
+    manifests = load_production_fixtures(dataset=data, fixtures_dir=tmp_path)
+    report = build_intake_report(dataset=data, manifests=manifests)
+    assert report.human_review == "pending"
+    for entry in report.checklist:
+        assert entry.review_status == "pending"
+        assert "human_review_decision" in entry.missing_fields
+
+
+def test_live_eligibility_remains_false_for_templates(tmp_path: Path) -> None:
+    data = dataset()
+    for task in data.tasks:
+        _write_template(tmp_path, task.task_id)
+    manifests = load_production_fixtures(dataset=data, fixtures_dir=tmp_path)
+    report = build_intake_report(dataset=data, manifests=manifests)
+    assert report.live_eligibility == "blocked"
+    for entry in report.checklist:
+        assert entry.live_eligible is False
+
+
+def test_frozen_task_inventory_is_unchanged() -> None:
+    data = dataset()
+    report = build_intake_report(dataset=data, manifests={})
+    assert report.task_count == FROZEN_TASK_COUNT
+    assert len(report.task_inventory) == FROZEN_TASK_COUNT
+    task_ids = [item.task_id for item in report.task_inventory]
+    assert task_ids == [task.task_id for task in data.tasks]
+    for item in report.task_inventory:
+        assert item.task_text_sha256 == text_sha256(item.task_text)
+
+
+def test_synthetic_fixture_cannot_become_genuine_evidence() -> None:
+    """A synthetic fixture never supplies genuine production evidence.
+
+    The synthetic fixture carries only ``synthetic_test``
+    sources, which are explicitly not genuine production-
+    fixture evidence. It is permanently ineligible and can
+    never be promoted to a live-eligible production fixture.
+    """
+
+    synthetic = FixtureManifest.model_validate(
+        json.loads((FIXTURES / "synthetic_manifest.json").read_text(encoding="utf-8"))
+    )
+    assert synthetic.fixture_kind == "synthetic_offline_test"
+    assert synthetic.review.status == "synthetic"
+    assert synthetic.live_eligible is False
+    for source in (
+        *synthetic.project_facts,
+        *synthetic.clarification_answers,
+        *synthetic.frozen_documents,
+        *synthetic.evaluation_only,
+    ):
+        assert source.source_type != "user_supplied_project_fact"
+        assert source.source_type != "user_supplied_answer"
+    assert synthetic.review.reviewer_id is None
+    assert synthetic.review.reviewed_at is None
+
+
+def test_structurally_complete_fixture_does_not_establish_authenticity(
+    tmp_path: Path,
+) -> None:
+    """Populated fields alone do not establish authenticity.
+
+    A fixture with every source field populated and a claimed
+    human approval is still only a structurally-valid, visibly
+    unverified claim. The software-verification boundary is
+    preserved: authenticity of the reviewer and provenance/consent
+    evidence remains an unverified claim requiring out-of-band
+    human confirmation, and the report can never authorize live
+    execution.
+    """
+
+    data = dataset()
+    for task in data.tasks:
+        payload = _template_payload(task.task_id)
+        payload["review"] = {
+            "status": "human_approved",
+            "reviewer_id": "unverified-unit-test-reviewer",
+            "reviewed_at": "2026-02-01T12:00:00Z",
+        }
+        manifest_path = tmp_path / f"{payload['fixture_id']}.json"
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    manifests = load_production_fixtures(dataset=data, fixtures_dir=tmp_path)
+    report = build_intake_report(dataset=data, manifests=manifests)
     assert "unverified claim" in report.software_verification_limit
     assert "never authorize live execution" in report.software_verification_limit
 

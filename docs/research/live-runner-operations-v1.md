@@ -258,7 +258,8 @@ files that a human fills in without touching implementation code.
 | `fixture_exists` | Whether the production fixture template exists. |
 | `task_matches_frozen_dataset` | Whether the fixture task id and text match the frozen dataset. |
 | `manifest_hash` | The content-addressed manifest hash. |
-| `provenance_supplied` | Whether the original-task provenance is `dataset_original`. |
+| `task_provenance_available` | Whether the original-task provenance is `dataset_original` (the frozen task came from the canonical dataset). |
+| `production_fixture_evidence_supplied` | Whether a human supplied genuine production-fixture evidence (project facts, clarification answers, frozen documents, evaluation-only criteria, as applicable). The canonical dataset task itself never counts as this evidence. |
 | `reviewer_supplied` | Whether a reviewer identity is present. |
 | `review_timestamp_supplied` | Whether a review timestamp is present. |
 | `review_status` | `pending` or `human_approved`. |
@@ -280,10 +281,19 @@ Production Study Fixture Intake
 ...
 08 research-information-001 (research_information) ........ READY
 
-Genuine fixture evidence ........ SUPPLIED
+Genuine fixture evidence ........ PENDING
 Human review .................... PENDING
 Live eligibility ................ BLOCKED
 ```
+
+`dataset_original` only proves the frozen task came from
+the canonical dataset. It is **not** genuine production-
+fixture evidence: that evidence stays `PENDING` until a
+human supplies the fixture-specific context, facts, answers,
+documents, evaluation-only information, and provenance/
+consent evidence the production study requires. The 8
+current templates are intentionally incomplete and therefore
+remain blocked.
 
 ### Synthetic fixtures stay separate
 

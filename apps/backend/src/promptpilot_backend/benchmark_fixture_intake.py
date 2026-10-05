@@ -20,9 +20,19 @@ The intake package makes three things explicit:
    live-eligible and cannot be admitted.
 3. **The human fill-in checklist.** A per-fixture, machine-
    readable report of exactly what a human must supply before
-   the fixture becomes eligible: reviewer identity, review
-   timestamp, genuine provenance/consent evidence, and the
+   the fixture becomes eligible: genuine production-fixture
+   evidence (project-specific context, user/project facts,
+   clarification answers, supporting documents, evaluation-
+   only information, and provenance/consent evidence, as
+   applicable), reviewer identity, review timestamp, and the
    admission decision.
+
+The canonical dataset task itself is **not** genuine
+production-fixture evidence. ``dataset_original`` only proves
+the frozen task came from the canonical dataset. Genuine
+production-fixture evidence remains ``pending`` until a human
+supplies the fixture-specific evidence the production study
+requires.
 
 Synthetic fixtures are never converted into production fixtures.
 The ``synthetic_offline_test`` kind and ``synthetic`` review
@@ -115,6 +125,17 @@ class FixtureChecklistEntry(StrictIntakeModel):
     Every field reports whether the human has supplied it. A
     template is born with the human-supplied fields unset, so the
     fixture is blocked until a genuine human completes them.
+
+    ``task_provenance_available`` and
+    ``production_fixture_evidence_supplied`` are deliberately
+    separate: the former records that the frozen task came from
+    the canonical dataset (``dataset_original``), while the latter
+    records that a human supplied the genuine production-fixture
+    evidence (project-specific context, user/project facts,
+    clarification answers, supporting documents, evaluation-only
+    information, and provenance/consent evidence, as applicable).
+    The canonical dataset task itself is never counted as genuine
+    production-fixture evidence.
     """
 
     fixture_id: str
@@ -123,7 +144,8 @@ class FixtureChecklistEntry(StrictIntakeModel):
     fixture_exists: bool
     task_matches_frozen_dataset: bool
     manifest_hash: str | None
-    provenance_supplied: bool
+    task_provenance_available: bool
+    production_fixture_evidence_supplied: bool
     reviewer_supplied: bool
     review_timestamp_supplied: bool
     review_status: FixtureReviewStatus
@@ -275,7 +297,8 @@ def _checklist_entry(
     fixture_exists: bool,
     task_matches_frozen_dataset: bool,
     manifest_hash: str | None,
-    provenance_supplied: bool,
+    task_provenance_available: bool,
+    production_fixture_evidence_supplied: bool,
     reviewer_supplied: bool,
     review_timestamp_supplied: bool,
     review_status: FixtureReviewStatus,
@@ -290,7 +313,10 @@ def _checklist_entry(
         fixture_exists=fixture_exists,
         task_matches_frozen_dataset=task_matches_frozen_dataset,
         manifest_hash=manifest_hash,
-        provenance_supplied=provenance_supplied,
+        task_provenance_available=task_provenance_available,
+        production_fixture_evidence_supplied=(
+            production_fixture_evidence_supplied
+        ),
         reviewer_supplied=reviewer_supplied,
         review_timestamp_supplied=review_timestamp_supplied,
         review_status=review_status,
@@ -309,12 +335,21 @@ def build_fixture_checklist(
 
     For every frozen task the checklist reports whether the
     production fixture exists, whether its task matches the frozen
-    dataset, its manifest hash, whether provenance/reviewer/
-    timestamp are supplied, its review status, its live eligibility,
-    and the exact missing fields and blocker codes. A template that
-    has not been human-reviewed is reported as blocked with the
-    ``human_review_pending`` and ``fixture_not_live_eligible``
-    blockers.
+    dataset, its manifest hash, whether the frozen-task provenance
+    is available, whether genuine production-fixture evidence is
+    supplied, whether reviewer/timestamp are supplied, its review
+    status, its live eligibility, and the exact missing fields and
+    blocker codes. A template that has not been human-reviewed is
+    reported as blocked with the ``human_review_pending`` and
+    ``fixture_not_live_eligible`` blockers.
+
+    The canonical dataset task (``dataset_original``) only proves
+    the frozen task came from the canonical dataset. It is never
+    counted as genuine production-fixture evidence: that evidence
+    remains pending until a human supplies the fixture-specific
+    context, facts, answers, documents, evaluation-only
+    information, and provenance/consent evidence the production
+    study requires.
     """
 
     supplied = manifests or {}
@@ -331,7 +366,8 @@ def build_fixture_checklist(
                     fixture_exists=False,
                     task_matches_frozen_dataset=False,
                     manifest_hash=None,
-                    provenance_supplied=False,
+                    task_provenance_available=True,
+                    production_fixture_evidence_supplied=False,
                     reviewer_supplied=False,
                     review_timestamp_supplied=False,
                     review_status="pending",
@@ -339,12 +375,13 @@ def build_fixture_checklist(
                     missing_fields=(
                         "fixture_manifest",
                         "original_task",
-                        "provenance_evidence",
+                        "production_fixture_evidence",
                         "reviewer_id",
                         "reviewed_at",
                     ),
                     blocker_codes=(
                         "fixture_manifest_missing",
+                        "production_fixture_evidence_pending",
                         "human_review_pending",
                         "fixture_not_live_eligible",
                     ),
@@ -360,16 +397,33 @@ def build_fixture_checklist(
         reviewer_supplied = manifest.review.reviewer_id is not None
         timestamp_supplied = manifest.review.reviewed_at is not None
         human_approved = manifest.review.status == "human_approved"
-        provenance_supplied = (
+        # The frozen task legitimately comes from the canonical
+        # dataset. This is task provenance, NOT genuine
+        # production-fixture evidence.
+        task_provenance_available = (
             manifest.original_task.provenance.source_type == "dataset_original"
+        )
+        # Genuine production-fixture evidence is human-supplied
+        # fixture-specific evidence: project facts, clarification
+        # answers, frozen documents, and evaluation-only criteria,
+        # as applicable. The canonical dataset task itself never
+        # counts as this evidence.
+        production_fixture_evidence_supplied = bool(
+            manifest.project_facts
+            or manifest.clarification_answers
+            or manifest.frozen_documents
+            or manifest.evaluation_only
         )
         missing_fields: list[str] = []
         blocker_codes: list[str] = []
         if not task_matches or not original_matches:
             blocker_codes.append("task_identity_mismatch")
-        if not provenance_supplied:
-            missing_fields.append("provenance_evidence")
-            blocker_codes.append("provenance_missing")
+        if not task_provenance_available:
+            missing_fields.append("task_provenance")
+            blocker_codes.append("task_provenance_missing")
+        if not production_fixture_evidence_supplied:
+            missing_fields.append("production_fixture_evidence")
+            blocker_codes.append("production_fixture_evidence_pending")
         if not reviewer_supplied:
             missing_fields.append("reviewer_id")
         if not timestamp_supplied:
@@ -387,7 +441,10 @@ def build_fixture_checklist(
                 fixture_exists=True,
                 task_matches_frozen_dataset=task_matches and original_matches,
                 manifest_hash=manifest_sha256(manifest),
-                provenance_supplied=provenance_supplied,
+                task_provenance_available=task_provenance_available,
+                production_fixture_evidence_supplied=(
+                    production_fixture_evidence_supplied
+                ),
                 reviewer_supplied=reviewer_supplied,
                 review_timestamp_supplied=timestamp_supplied,
                 review_status=(
@@ -427,14 +484,16 @@ def build_intake_report(
         entry.review_status == "human_approved" and entry.live_eligible
         for entry in checklist
     )
-    all_provenance = all(entry.provenance_supplied for entry in checklist)
+    all_evidence = all(
+        entry.production_fixture_evidence_supplied for entry in checklist
+    )
     return FixtureIntakeReport(
         dataset_name=dataset.name,
         dataset_sha256=dataset_hash,
         task_count=len(dataset.tasks),
         task_inventory=inventory,
         checklist=checklist,
-        genuine_fixture_evidence="supplied" if all_provenance else "pending",
+        genuine_fixture_evidence="supplied" if all_evidence else "pending",
         human_review="complete" if all_human_reviewed else "pending",
         live_eligibility="eligible" if all_human_reviewed else "blocked",
         software_verification_limit=(
