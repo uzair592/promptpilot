@@ -1,0 +1,225 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-quality:
+    name: Frontend quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify pnpm version
+        run: test "$(pnpm --version)" = "11.10.0"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Build frontend
+        run: pnpm --filter @promptpilot/frontend build
+
+      - name: Check formatting
+        run: >-
+          pnpm exec prettier --check .github/workflows/ci.yml README.md
+          apps/frontend/README.md package.json playwright.config.ts
+          tests/acceptance/run.mjs
+
+      - name: Check patch whitespace
+        run: git diff --check HEAD^ HEAD
+
+  backend-quality:
+    name: Backend quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/backend/pyproject.toml
+
+      - name: Install backend development dependencies
+        working-directory: apps/backend
+        run: python -m pip install --editable ".[dev]"
+
+      - name: Full backend test suite
+        working-directory: apps/backend
+        run: python -m pytest -q
+
+      - name: Ruff
+        working-directory: apps/backend
+        run: python -m ruff check src tests
+
+      - name: Strict mypy
+        working-directory: apps/backend
+        run: python -m mypy --strict src
+
+      - name: Smoke-test documented Uvicorn startup
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          import tempfile
+          import time
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          with tempfile.TemporaryDirectory(prefix="promptpilot-ci-") as temporary:
+              database = Path(temporary, "smoke.db")
+              log_path = Path(temporary, "uvicorn.log")
+              environment = os.environ.copy()
+              environment["DATABASE_URL"] = f"sqlite:///{database}"
+              environment["PYTHONPATH"] = "src"
+              with log_path.open("w+", encoding="utf-8") as log:
+                  server = subprocess.Popen(
+                      [
+                          sys.executable,
+                          "-m",
+                          "uvicorn",
+                          "promptpilot_backend.main:app",
+                          "--host",
+                          "127.0.0.1",
+                          "--port",
+                          "8130",
+                      ],
+                      cwd="apps/backend",
+                      env=environment,
+                      stdout=log,
+                      stderr=subprocess.STDOUT,
+                  )
+                  succeeded = False
+                  try:
+                      deadline = time.monotonic() + 30
+                      while time.monotonic() < deadline:
+                          if server.poll() is not None:
+                              raise RuntimeError(
+                                  f"Uvicorn exited early with status {server.returncode}"
+                              )
+                          try:
+                              with urllib.request.urlopen(
+                                  "http://127.0.0.1:8130/docs", timeout=2
+                              ) as response:
+                                  if response.status != 200:
+                                      raise RuntimeError(
+                                          f"Unexpected /docs status: {response.status}"
+                                      )
+                                  print("Uvicorn startup smoke passed: /docs returned 200")
+                                  succeeded = True
+                                  break
+                          except (urllib.error.URLError, TimeoutError):
+                              time.sleep(0.25)
+                      if not succeeded:
+                          raise TimeoutError("Uvicorn /docs endpoint did not become ready")
+                  finally:
+                      if server.poll() is None:
+                          server.terminate()
+                          try:
+                              server.wait(timeout=10)
+                          except subprocess.TimeoutExpired:
+                              server.kill()
+                              server.wait(timeout=10)
+                      if not succeeded:
+                          log.flush()
+                          print(log_path.read_text(encoding="utf-8"), file=sys.stderr)
+          PY
+
+  browser-acceptance:
+    name: Browser acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.10.0
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify pnpm version
+        run: test "$(pnpm --version)" = "11.10.0"
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/backend/pyproject.toml
+
+      - name: Install backend development dependencies
+        working-directory: apps/backend
+        run: python -m pip install --editable ".[dev]"
+
+      - name: Install Chromium and system dependencies
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run persistent-workflow acceptance test
+        env:
+          PYTHON: python
+        run: pnpm test:e2e
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failure-diagnostics
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 5
