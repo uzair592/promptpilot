@@ -20,5 +20,7 @@ storage/
 .idea/
 .vscode/
 *.log
+playwright-report/
+test-results/
 Thumbs.db
 .DS_Store
