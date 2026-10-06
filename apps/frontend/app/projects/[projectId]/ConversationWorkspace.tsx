@@ -1075,8 +1075,8 @@ export function ConversationWorkspace({
                     />
                     {!comparison.eligible ? (
                       <p className="empty-note">
-                        {comparison.reason} Run or select compatible responses
-                        in Execution.
+                        {comparison.reason} Run the missing or mismatched
+                        strategy in Execution.
                       </p>
                     ) : relatedEvaluations.length === 0 ? (
                       <p className="empty-note">
