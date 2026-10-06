@@ -39,6 +39,7 @@ import {
   getMessages,
   getNextQuestion,
   getRuns,
+  isModelRunSuccessful,
   sendMessage,
   skipQuestion,
   uploadDocument,
@@ -118,12 +119,11 @@ export function ConversationWorkspace({
     [runs, currentPrompt, source],
   );
   const baseline = relatedRuns.find(
-    (run) =>
-      run.execution_strategy === "baseline" && run.status === "completed",
+    (run) => run.execution_strategy === "baseline" && isModelRunSuccessful(run),
   );
   const pilot = relatedRuns.find(
     (run) =>
-      run.execution_strategy === "promptpilot" && run.status === "completed",
+      run.execution_strategy === "promptpilot" && isModelRunSuccessful(run),
   );
   const relatedEvaluations = evaluations.filter(
     (evaluation) =>
@@ -402,7 +402,7 @@ export function ConversationWorkspace({
     evidenceCount > 0,
     Boolean(context),
     Boolean(currentPrompt),
-    relatedRuns.some((run) => run.status === "completed"),
+    relatedRuns.some((run) => isModelRunSuccessful(run)),
     relatedEvaluations.length > 0,
   ];
 
@@ -1074,7 +1074,7 @@ export function ConversationWorkspace({
                     />
                     {!baseline || !pilot ? (
                       <p className="empty-note">
-                        A completed baseline response and a completed
+                        A succeeded baseline response and a succeeded
                         PromptPilot response are both required. Run the missing
                         strategy in Execution.
                       </p>

@@ -13,6 +13,7 @@ import {
   getMemory,
   getNextQuestion,
   getRuns,
+  isModelRunSuccessful,
   skipQuestion,
 } from "../apps/frontend/lib/conversations.js";
 
@@ -23,6 +24,11 @@ const response = (body: unknown, status = 200) =>
   });
 
 describe("persistent frontend workflow contracts", () => {
+  it("uses succeeded as the shared ModelRun success interpretation", () => {
+    expect(isModelRunSuccessful({ status: "succeeded" })).toBe(true);
+    expect(isModelRunSuccessful({ status: "failed" })).toBe(false);
+  });
+
   it("restores analysis and clarification progress", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -170,14 +176,141 @@ describe("persistent frontend workflow contracts", () => {
     });
     expect(comparisonEligibility(failedRuns)).toEqual({
       eligible: false,
-      reason: "A completed baseline response is missing.",
+      reason: "A succeeded baseline response is missing.",
     });
     expect(
       comparisonEligibility([
-        { execution_strategy: "baseline", status: "completed" },
-        { execution_strategy: "promptpilot", status: "completed" },
+        { execution_strategy: "baseline", status: "succeeded" },
+        { execution_strategy: "promptpilot", status: "succeeded" },
       ] as never),
     ).toMatchObject({ eligible: true });
     fetchMock.mockRestore();
+  });
+
+  it("recognises backend-shaped succeeded baseline and PromptPilot runs", () => {
+    const baselineRun = {
+      id: "baseline-run-1",
+      execution_strategy: "baseline" as const,
+      status: "succeeded" as const,
+      source_message_id: "message-1",
+      provider: "openai",
+      model: "gpt-4",
+      response_text: "Baseline response",
+    };
+    const promptpilotRun = {
+      id: "promptpilot-run-1",
+      execution_strategy: "promptpilot" as const,
+      status: "succeeded" as const,
+      source_message_id: "message-1",
+      provider: "openai",
+      model: "gpt-4",
+      response_text: "PromptPilot response",
+    };
+    expect(
+      comparisonEligibility([baselineRun as never, promptpilotRun as never]),
+    ).toEqual({
+      eligible: true,
+      reason: "Compatible saved responses are available.",
+    });
+  });
+
+  it("recognises a backend-shaped PromptPilot run with status succeeded", () => {
+    const run = {
+      id: "promptpilot-run-1",
+      execution_strategy: "promptpilot" as const,
+      status: "succeeded" as const,
+      source_message_id: "message-1",
+      provider: "openai",
+      model: "gpt-4",
+      response_text: "PromptPilot response",
+    };
+    expect(comparisonEligibility([run as never])).toEqual({
+      eligible: false,
+      reason: "A succeeded baseline response is missing.",
+    });
+  });
+
+  it("recognises a compatible baseline and PromptPilot pair as eligible for comparison", () => {
+    const runs = [
+      {
+        id: "baseline-run-1",
+        execution_strategy: "baseline" as const,
+        status: "succeeded" as const,
+        source_message_id: "message-1",
+        provider: "openai",
+        model: "gpt-4",
+        response_text: "Baseline response",
+      },
+      {
+        id: "promptpilot-run-1",
+        execution_strategy: "promptpilot" as const,
+        status: "succeeded" as const,
+        source_message_id: "message-1",
+        provider: "openai",
+        model: "gpt-4",
+        response_text: "PromptPilot response",
+      },
+    ];
+    const result = comparisonEligibility(runs as never);
+    expect(result.eligible).toBe(true);
+    expect(result.reason).toBe("Compatible saved responses are available.");
+  });
+
+  it("rejects failed runs as ineligible", () => {
+    const runs = [
+      {
+        id: "failed-run",
+        execution_strategy: "baseline" as const,
+        status: "failed" as const,
+        source_message_id: "message-1",
+        provider: "openai",
+        model: "gpt-4",
+        response_text: null,
+        error_message: "Provider unavailable",
+      },
+    ];
+    expect(comparisonEligibility(runs as never)).toEqual({
+      eligible: false,
+      reason: "A succeeded baseline response is missing.",
+    });
+  });
+
+  it("rejects pending or unknown statuses as ineligible", () => {
+    const pendingRuns = [
+      {
+        id: "pending-run",
+        execution_strategy: "baseline" as const,
+        status: "pending" as unknown as "succeeded" | "failed",
+        source_message_id: "message-1",
+        provider: "openai",
+        model: "gpt-4",
+        response_text: null,
+      },
+    ];
+    const unknownRuns = [
+      {
+        ...pendingRuns[0],
+        id: "unknown-run",
+        status: "unknown" as never,
+      },
+    ];
+    expect(comparisonEligibility(pendingRuns as never)).toEqual({
+      eligible: false,
+      reason: "A succeeded baseline response is missing.",
+    });
+    expect(comparisonEligibility(unknownRuns as never)).toEqual({
+      eligible: false,
+      reason: "A succeeded baseline response is missing.",
+    });
+  });
+
+  it("question-session status completed remains unchanged as a separate contract", () => {
+    const questionSession = {
+      id: "session-1",
+      status: "completed",
+      stop_reason: "no_unresolved_gaps",
+      next_question: null,
+    };
+    expect(questionSession.status).toBe("completed");
   });
 });

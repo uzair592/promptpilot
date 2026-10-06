@@ -122,6 +122,12 @@ export type GeneratedPrompt = {
   warnings: string[];
   generation_metadata: Record<string, unknown>;
 };
+export type ModelRunStatus = "succeeded" | "failed";
+
+export function isModelRunSuccessful(run: Pick<ModelRun, "status">): boolean {
+  return run.status === "succeeded";
+}
+
 export type ModelRun = {
   id: string;
   prompt_version_id: string | null;
@@ -131,7 +137,7 @@ export type ModelRun = {
   response_text: string | null;
   provider: string;
   model: string;
-  status: string;
+  status: ModelRunStatus;
   finish_reason: string | null;
   latency_ms: number | null;
   error_message: string | null;
@@ -172,22 +178,21 @@ export function comparisonEligibility(runs: ModelRun[]): {
   reason: string;
 } {
   const baseline = runs.some(
-    (run) =>
-      run.execution_strategy === "baseline" && run.status === "completed",
+    (run) => run.execution_strategy === "baseline" && isModelRunSuccessful(run),
   );
   const promptpilot = runs.some(
     (run) =>
-      run.execution_strategy === "promptpilot" && run.status === "completed",
+      run.execution_strategy === "promptpilot" && isModelRunSuccessful(run),
   );
   if (!baseline)
     return {
       eligible: false,
-      reason: "A completed baseline response is missing.",
+      reason: "A succeeded baseline response is missing.",
     };
   if (!promptpilot)
     return {
       eligible: false,
-      reason: "A completed PromptPilot response is missing.",
+      reason: "A succeeded PromptPilot response is missing.",
     };
   return {
     eligible: true,
