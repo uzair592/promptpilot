@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 
 import { apiBaseUrl, getProject } from "../../../lib/projects";
 import { ConversationWorkspace } from "./ConversationWorkspace";
-import { ContextPreview } from "./ContextPreview";
 
 type ProjectDetail = {
   name: string;
@@ -77,17 +76,6 @@ export default function ProjectPage() {
           project.current_user_role !== "member" && project.status === "active"
         }
       />
-      <ContextPreview projectId={params.projectId} />
-      <div className="placeholder-grid">
-        {["Context", "Requirements", "Prompts", "Evaluations"].map((item) => (
-          <section className="panel" key={item}>
-            <h3>{item}</h3>
-            <p className="muted">
-              This workspace module is coming in a future slice.
-            </p>
-          </section>
-        ))}
-      </div>
     </main>
   );
 }

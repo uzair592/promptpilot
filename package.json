@@ -9,6 +9,7 @@
     "dev": "pnpm typecheck --watch",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:e2e": "node tests/acceptance/run.mjs",
     "test:watch": "vitest",
     "format": "prettier --check .",
     "format:write": "prettier --write .",
@@ -21,6 +22,7 @@
     "@typescript-eslint/parser": "^8.32.1",
     "eslint": "^9.26.0",
     "prettier": "^3.5.3",
+    "@playwright/test": "^1.55.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.2"
   }

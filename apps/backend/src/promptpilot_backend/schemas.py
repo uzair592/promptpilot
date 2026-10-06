@@ -320,6 +320,8 @@ class PromptGenerateRequest(BaseModel):
 class PromptGenerationResponse(BaseModel):
     version_id: UUID
     version_number: int
+    source_message_id: UUID
+    created_at: datetime
     original_prompt: str
     optimized_prompt: str
     task_summary: str
@@ -342,6 +344,7 @@ class ExecutePromptRequest(BaseModel):
 class ModelRunResponse(BaseModel):
     id: UUID
     prompt_version_id: UUID | None
+    source_message_id: UUID
     execution_strategy: str
     optimized_prompt: str
     response_text: str | None

@@ -20,6 +20,19 @@ def project(client) -> str:
     return response.json()["id"]
 
 
+def test_message_idempotency_header_is_allowed_by_cors(client):
+    response = client.options(
+        "/api/v1/conversations/00000000-0000-0000-0000-000000000000/messages",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type,idempotency-key",
+        },
+    )
+    assert response.status_code == 200
+    assert "idempotency-key" in response.headers["access-control-allow-headers"].lower()
+
+
 def test_conversation_message_persistence_and_idempotency(client):
     register(client, "owner@example.com", "Owner")
     project_id = project(client)

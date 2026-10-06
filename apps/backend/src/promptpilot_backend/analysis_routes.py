@@ -9,12 +9,33 @@ from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
 from .llm_provider import ProviderError
-from .models import Message, User
+from .models import Message, PromptAnalysis, User
 from .project_policy import ProjectRole
 from .question_service import create_question_session
 from .schemas import PromptAnalysisResponse
 
 router = APIRouter(prefix="/api/v1/conversations/{conversation_id}/messages", tags=["analysis"])
+
+
+@router.get("/{message_id}/analysis", response_model=PromptAnalysisResponse)
+def get_latest_analysis(
+    conversation_id: UUID,
+    message_id: UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> PromptAnalysisResponse:
+    conversation_access(db, conversation_id, user, ProjectRole.MEMBER)
+    analysis = db.scalar(
+        select(PromptAnalysis)
+        .where(
+            PromptAnalysis.conversation_id == conversation_id,
+            PromptAnalysis.message_id == message_id,
+        )
+        .order_by(PromptAnalysis.created_at.desc())
+    )
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    return PromptAnalysisResponse.model_validate(analysis)
 
 
 @router.post(

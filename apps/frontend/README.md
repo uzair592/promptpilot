@@ -1,5 +1,27 @@
 # PromptPilot Frontend
 
-This is the future Next.js frontend boundary. It is intentionally a scaffold in Phase 1; product UI begins in Phase 3.
+The Next.js frontend provides the persistent PromptPilot product workflow: authentication, projects, conversations, original requests, analysis, clarification, evidence and document status, context assembly, versioned prompt generation, target execution, and saved evaluation comparison.
 
-The frontend calls backend use cases through typed contracts and contains no domain or AI orchestration logic.
+Install workspace dependencies from the repository root with `pnpm install`, then run:
+
+```powershell
+pnpm --filter @promptpilot/frontend dev
+```
+
+The UI uses cookie-authenticated backend routes and defaults to `http://localhost:8000`. Override that address with `NEXT_PUBLIC_API_BASE_URL`. Start the backend first and open `http://localhost:3000`.
+
+Refresh and navigation recovery come from persisted backend records. Context previews are assembled on demand. Prompt generation and live target execution show an unavailable state unless the backend has provider credentials; the frontend never accepts or exposes those credentials and never substitutes fake responses. Evaluation is shown only for persisted runs, and a baseline/PromptPilot comparison requires one persisted `succeeded` run of each strategy.
+
+Run frontend checks from the repository root:
+
+```powershell
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm --filter @promptpilot/frontend build
+```
+
+The browser acceptance journey uses an isolated temporary SQLite database and a
+local deterministic OpenAI-compatible fake provider. It does not call a live
+provider. Install the Playwright browser once with
+`pnpm exec playwright install chromium`, then run `pnpm test:e2e`.
