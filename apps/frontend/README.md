@@ -20,3 +20,8 @@ pnpm typecheck
 pnpm test
 pnpm --filter @promptpilot/frontend build
 ```
+
+The browser acceptance journey uses an isolated temporary SQLite database and a
+local deterministic OpenAI-compatible fake provider. It does not call a live
+provider. Install the Playwright browser once with
+`pnpm exec playwright install chromium`, then run `pnpm test:e2e`.
