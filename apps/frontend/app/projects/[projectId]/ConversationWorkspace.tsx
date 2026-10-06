@@ -25,6 +25,7 @@ import {
   analyzeMessage,
   answerQuestion,
   assembleContext,
+  comparisonStageCompletion,
   compareEvaluations,
   createConversation,
   executePrompt,
@@ -39,7 +40,6 @@ import {
   getMessages,
   getNextQuestion,
   getRuns,
-  isModelRunSuccessful,
   selectComparisonPair,
   sendMessage,
   skipQuestion,
@@ -126,14 +126,8 @@ export function ConversationWorkspace({
     activeSourceId,
     currentPrompt?.version_id ?? null,
   );
-  const relatedEvaluations = comparison.pair
-    ? evaluations.filter(
-        (evaluation) =>
-          evaluation.baseline_model_run_id === comparison.pair.baseline.id &&
-          evaluation.promptpilot_model_run_id ===
-            comparison.pair.promptpilot.id,
-      )
-    : [];
+  const comparisonProgress = comparisonStageCompletion(comparison, evaluations);
+  const relatedEvaluations = comparisonProgress.relatedEvaluations;
 
   const loadProjectEvidence = useCallback(async () => {
     const [savedMemory, savedDocuments] = await Promise.all([
@@ -403,8 +397,8 @@ export function ConversationWorkspace({
     evidenceCount > 0,
     Boolean(context),
     Boolean(currentPrompt),
-    relatedRuns.some((run) => isModelRunSuccessful(run)),
-    relatedEvaluations.length > 0,
+    comparisonProgress.executionComplete,
+    comparisonProgress.evaluationComplete,
   ];
 
   if (loading && !selected)

@@ -258,6 +258,34 @@ export type Evaluation = {
   }>;
 };
 
+export function comparisonStageCompletion(
+  selection: ComparisonSelection,
+  evaluations: readonly Evaluation[],
+): {
+  executionComplete: boolean;
+  evaluationComplete: boolean;
+  relatedEvaluations: Evaluation[];
+} {
+  if (!selection.eligible) {
+    return {
+      executionComplete: false,
+      evaluationComplete: false,
+      relatedEvaluations: [],
+    };
+  }
+
+  const relatedEvaluations = evaluations.filter(
+    (evaluation) =>
+      evaluation.baseline_model_run_id === selection.pair.baseline.id &&
+      evaluation.promptpilot_model_run_id === selection.pair.promptpilot.id,
+  );
+  return {
+    executionComplete: true,
+    evaluationComplete: relatedEvaluations.length > 0,
+    relatedEvaluations,
+  };
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,

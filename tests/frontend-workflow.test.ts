@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  Evaluation,
   ModelRun,
   answerQuestion,
   assembleContext,
+  comparisonStageCompletion,
   compareEvaluations,
   friendlyError,
   generatePrompt,
@@ -49,6 +51,44 @@ const modelRun = (
 
 const runtimeStatusRun = (run: ModelRun, status: string): ModelRun =>
   ({ ...run, status }) as ModelRun;
+
+const getComparisonProgress = (
+  runs: readonly ModelRun[],
+  evaluations: readonly Evaluation[] = [],
+  sourceMessageId: string | null = "message-1",
+  promptVersionId: string | null = "prompt-version-1",
+) =>
+  comparisonStageCompletion(
+    selectComparisonPair(runs, sourceMessageId, promptVersionId),
+    evaluations,
+  );
+
+const evaluationForPair = (
+  baselineRunId: string,
+  promptpilotRunId: string,
+): Evaluation => ({
+  id: "evaluation-1",
+  project_id: "project-1",
+  conversation_id: "conversation-1",
+  baseline_model_run_id: baselineRunId,
+  promptpilot_model_run_id: promptpilotRunId,
+  method: "heuristic",
+  evaluator_provider: "deterministic",
+  evaluator_model: "heuristic-v1",
+  rubric_version: "v1",
+  baseline_score: 1,
+  promptpilot_score: 2,
+  overall_delta: 1,
+  winner: "promptpilot",
+  comparison_summary: "PromptPilot scored higher",
+  baseline_strengths: [],
+  baseline_weaknesses: [],
+  promptpilot_strengths: [],
+  promptpilot_weaknesses: [],
+  metadata: {},
+  created_at: "2026-10-06T00:00:00Z",
+  items: [],
+});
 
 describe("persistent frontend workflow contracts", () => {
   it("uses succeeded as the shared ModelRun success interpretation", () => {
@@ -410,6 +450,88 @@ describe("persistent frontend workflow contracts", () => {
       reason: "No compatible response pair is available.",
       pair: null,
     });
+  });
+
+  it("does not complete Execution for a single successful strategy", () => {
+    expect(
+      getComparisonProgress([modelRun("baseline-1", "baseline")])
+        .executionComplete,
+    ).toBe(false);
+    expect(
+      getComparisonProgress([modelRun("pilot-1", "promptpilot")])
+        .executionComplete,
+    ).toBe(false);
+  });
+
+  it("does not complete Execution for failed, pending, or unknown runs", () => {
+    for (const status of ["failed", "pending", "unknown"]) {
+      const progress = getComparisonProgress([
+        runtimeStatusRun(modelRun("baseline-1", "baseline"), status),
+        modelRun("pilot-1", "promptpilot"),
+      ]);
+      expect(progress.executionComplete).toBe(false);
+    }
+  });
+
+  it("does not complete Execution for incompatible source, provider, model, prompt, or conversation", () => {
+    const baseline = modelRun("baseline-1", "baseline");
+    const pilot = modelRun("pilot-1", "promptpilot");
+    const incompatiblePairs = [
+      [
+        baseline,
+        modelRun("pilot-source", "promptpilot", {
+          source_message_id: "message-2",
+        }),
+      ],
+      [
+        baseline,
+        modelRun("pilot-provider", "promptpilot", {
+          provider: "anthropic",
+        }),
+      ],
+      [baseline, modelRun("pilot-model", "promptpilot", { model: "gpt-4.1" })],
+      [
+        baseline,
+        modelRun("pilot-prompt", "promptpilot", {
+          prompt_version_id: "old-prompt-version",
+        }),
+      ],
+    ] satisfies Array<[ModelRun, ModelRun]>;
+
+    for (const pair of incompatiblePairs) {
+      expect(getComparisonProgress(pair).executionComplete).toBe(false);
+    }
+    expect(
+      getComparisonProgress([baseline, pilot], [], null).executionComplete,
+    ).toBe(false);
+  });
+
+  it("completes Execution for a compatible pair but not Evaluation before evaluation", () => {
+    const progress = getComparisonProgress([
+      modelRun("baseline-1", "baseline"),
+      modelRun("pilot-1", "promptpilot"),
+    ]);
+
+    expect(progress.executionComplete).toBe(true);
+    expect(progress.evaluationComplete).toBe(false);
+  });
+
+  it("completes Evaluation only for an evaluation matching the selected run IDs", () => {
+    const baseline = modelRun("baseline-selected", "baseline");
+    const pilot = modelRun("pilot-selected", "promptpilot");
+
+    expect(
+      getComparisonProgress(
+        [baseline, pilot],
+        [evaluationForPair(baseline.id, pilot.id)],
+      ).evaluationComplete,
+    ).toBe(true);
+    expect(
+      getComparisonProgress(
+        [baseline, pilot],
+        [evaluationForPair("other-baseline", "other-pilot")],
+      ).evaluationComplete,
+    ).toBe(false);
   });
 
   it("question-session status completed remains unchanged as a separate contract", () => {
