@@ -40,6 +40,7 @@ import {
   getNextQuestion,
   getRuns,
   isModelRunSuccessful,
+  selectComparisonPair,
   sendMessage,
   skipQuestion,
   uploadDocument,
@@ -107,6 +108,8 @@ export function ConversationWorkspace({
     () => prompts.find((item) => item.source_message_id === source?.id) ?? null,
     [prompts, source],
   );
+  const activeSourceId =
+    source && source.conversation_id === selected?.id ? source.id : null;
   const relatedRuns = useMemo(
     () =>
       runs.filter(
@@ -118,18 +121,19 @@ export function ConversationWorkspace({
       ),
     [runs, currentPrompt, source],
   );
-  const baseline = relatedRuns.find(
-    (run) => run.execution_strategy === "baseline" && isModelRunSuccessful(run),
+  const comparison = selectComparisonPair(
+    runs,
+    activeSourceId,
+    currentPrompt?.version_id ?? null,
   );
-  const pilot = relatedRuns.find(
-    (run) =>
-      run.execution_strategy === "promptpilot" && isModelRunSuccessful(run),
-  );
-  const relatedEvaluations = evaluations.filter(
-    (evaluation) =>
-      evaluation.baseline_model_run_id === baseline?.id &&
-      evaluation.promptpilot_model_run_id === pilot?.id,
-  );
+  const relatedEvaluations = comparison.pair
+    ? evaluations.filter(
+        (evaluation) =>
+          evaluation.baseline_model_run_id === comparison.pair.baseline.id &&
+          evaluation.promptpilot_model_run_id ===
+            comparison.pair.promptpilot.id,
+      )
+    : [];
 
   const loadProjectEvidence = useCallback(async () => {
     const [savedMemory, savedDocuments] = await Promise.all([
@@ -379,15 +383,12 @@ export function ConversationWorkspace({
   }
 
   async function compare() {
-    if (!selected || !baseline || !pilot) return;
+    if (!selected || !comparison.pair) return;
+    const pair = comparison.pair;
     await act(
       "compare",
       async () => {
-        const result = await compareEvaluations(
-          selected.id,
-          baseline.id,
-          pilot.id,
-        );
+        const result = await compareEvaluations(selected.id, pair);
         setEvaluations((items) => [result, ...items]);
       },
       "Evaluation failed. The saved runs remain available to retry.",
@@ -1060,11 +1061,11 @@ export function ConversationWorkspace({
                   <section>
                     <StageTitle
                       title="Evaluation and comparison"
-                      description="Scores shown here come only from saved compatible model runs."
+                      description="Request, provider, and model checks are preliminary; the server performs the final compatibility check, including generation parameters."
                       actions={
                         <button
                           onClick={compare}
-                          disabled={!baseline || !pilot || Boolean(busy)}
+                          disabled={!comparison.eligible || Boolean(busy)}
                         >
                           {busy === "compare"
                             ? "Evaluating…"
@@ -1072,11 +1073,10 @@ export function ConversationWorkspace({
                         </button>
                       }
                     />
-                    {!baseline || !pilot ? (
+                    {!comparison.eligible ? (
                       <p className="empty-note">
-                        A succeeded baseline response and a succeeded
-                        PromptPilot response are both required. Run the missing
-                        strategy in Execution.
+                        {comparison.reason} Run or select compatible responses
+                        in Execution.
                       </p>
                     ) : relatedEvaluations.length === 0 ? (
                       <p className="empty-note">

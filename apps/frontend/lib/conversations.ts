@@ -143,6 +143,91 @@ export type ModelRun = {
   error_message: string | null;
   created_at: string;
 };
+
+export type ComparisonRunPair = {
+  baseline: ModelRun;
+  promptpilot: ModelRun;
+};
+
+export type ComparisonSelection =
+  | {
+      eligible: true;
+      reason: string;
+      pair: ComparisonRunPair;
+    }
+  | {
+      eligible: false;
+      reason: string;
+      pair: null;
+    };
+
+export function selectComparisonPair(
+  runs: readonly ModelRun[],
+  sourceMessageId: string | null,
+  promptVersionId: string | null,
+): ComparisonSelection {
+  if (!sourceMessageId) {
+    return {
+      eligible: false,
+      reason: "Select a request before comparing responses.",
+      pair: null,
+    };
+  }
+
+  const succeededBaselines = runs.filter(
+    (run) => run.execution_strategy === "baseline" && isModelRunSuccessful(run),
+  );
+  const succeededPromptpilots = runs.filter(
+    (run) =>
+      run.execution_strategy === "promptpilot" && isModelRunSuccessful(run),
+  );
+  const baselines = succeededBaselines.filter(
+    (run) => run.source_message_id === sourceMessageId,
+  );
+  const promptpilots = succeededPromptpilots.filter(
+    (run) =>
+      run.source_message_id === sourceMessageId &&
+      (!promptVersionId || run.prompt_version_id === promptVersionId),
+  );
+
+  if (!baselines.length || !promptpilots.length) {
+    if (succeededBaselines.length && succeededPromptpilots.length) {
+      return {
+        eligible: false,
+        reason: "No compatible response pair is available.",
+        pair: null,
+      };
+    }
+    return {
+      eligible: false,
+      reason: !baselines.length
+        ? "A successful baseline response is required."
+        : "A successful PromptPilot response is required.",
+      pair: null,
+    };
+  }
+
+  for (const baseline of baselines) {
+    const promptpilot = promptpilots.find(
+      (run) =>
+        run.provider === baseline.provider && run.model === baseline.model,
+    );
+    if (promptpilot) {
+      return {
+        eligible: true,
+        reason: "Compatible saved responses are available.",
+        pair: { baseline, promptpilot },
+      };
+    }
+  }
+
+  return {
+    eligible: false,
+    reason: "The saved responses use different providers or models.",
+    pair: null,
+  };
+}
+
 export type Evaluation = {
   id: string;
   project_id: string;
@@ -172,33 +257,6 @@ export type Evaluation = {
     explanation: string;
   }>;
 };
-
-export function comparisonEligibility(runs: ModelRun[]): {
-  eligible: boolean;
-  reason: string;
-} {
-  const baseline = runs.some(
-    (run) => run.execution_strategy === "baseline" && isModelRunSuccessful(run),
-  );
-  const promptpilot = runs.some(
-    (run) =>
-      run.execution_strategy === "promptpilot" && isModelRunSuccessful(run),
-  );
-  if (!baseline)
-    return {
-      eligible: false,
-      reason: "A succeeded baseline response is missing.",
-    };
-  if (!promptpilot)
-    return {
-      eligible: false,
-      reason: "A succeeded PromptPilot response is missing.",
-    };
-  return {
-    eligible: true,
-    reason: "Compatible saved responses are available.",
-  };
-}
 
 export class ApiError extends Error {
   constructor(
@@ -369,16 +427,15 @@ export async function getEvaluations(
 }
 export const compareEvaluations = (
   conversationId: string,
-  baselineRunId: string,
-  promptpilotRunId: string,
+  pair: ComparisonRunPair,
 ) =>
   api<Evaluation>(
     `/api/v1/conversations/${conversationId}/evaluations/compare`,
     {
       method: "POST",
       body: JSON.stringify({
-        baseline_model_run_id: baselineRunId,
-        promptpilot_model_run_id: promptpilotRunId,
+        baseline_model_run_id: pair.baseline.id,
+        promptpilot_model_run_id: pair.promptpilot.id,
         method: "heuristic",
       }),
     },

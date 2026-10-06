@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ApiError,
+  ModelRun,
   answerQuestion,
   assembleContext,
-  comparisonEligibility,
+  compareEvaluations,
   friendlyError,
   generatePrompt,
   getDocuments,
@@ -14,6 +15,7 @@ import {
   getNextQuestion,
   getRuns,
   isModelRunSuccessful,
+  selectComparisonPair,
   skipQuestion,
 } from "../apps/frontend/lib/conversations.js";
 
@@ -22,6 +24,31 @@ const response = (body: unknown, status = 200) =>
     status,
     headers: { "content-type": "application/json" },
   });
+
+const modelRun = (
+  id: string,
+  execution_strategy: ModelRun["execution_strategy"],
+  overrides: Partial<ModelRun> = {},
+): ModelRun => ({
+  id,
+  prompt_version_id:
+    execution_strategy === "promptpilot" ? "prompt-version-1" : null,
+  source_message_id: "message-1",
+  execution_strategy,
+  optimized_prompt: "Create a plan",
+  response_text: `${execution_strategy} response`,
+  provider: "openai",
+  model: "gpt-4",
+  status: "succeeded",
+  finish_reason: "stop",
+  latency_ms: 100,
+  error_message: null,
+  created_at: "2026-10-06T00:00:00Z",
+  ...overrides,
+});
+
+const runtimeStatusRun = (run: ModelRun, status: string): ModelRun =>
+  ({ ...run, status }) as ModelRun;
 
 describe("persistent frontend workflow contracts", () => {
   it("uses succeeded as the shared ModelRun success interpretation", () => {
@@ -143,7 +170,7 @@ describe("persistent frontend workflow contracts", () => {
     fetchMock.mockRestore();
   });
 
-  it("reports provider unavailability and comparison eligibility without inventing results", async () => {
+  it("reports provider unavailability without inventing results", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -174,133 +201,214 @@ describe("persistent frontend workflow contracts", () => {
       status: "failed",
       response_text: null,
     });
-    expect(comparisonEligibility(failedRuns)).toEqual({
-      eligible: false,
-      reason: "A succeeded baseline response is missing.",
-    });
-    expect(
-      comparisonEligibility([
-        { execution_strategy: "baseline", status: "succeeded" },
-        { execution_strategy: "promptpilot", status: "succeeded" },
-      ] as never),
-    ).toMatchObject({ eligible: true });
     fetchMock.mockRestore();
   });
 
-  it("recognises backend-shaped succeeded baseline and PromptPilot runs", () => {
-    const baselineRun = {
-      id: "baseline-run-1",
-      execution_strategy: "baseline" as const,
-      status: "succeeded" as const,
-      source_message_id: "message-1",
-      provider: "openai",
-      model: "gpt-4",
-      response_text: "Baseline response",
-    };
-    const promptpilotRun = {
-      id: "promptpilot-run-1",
-      execution_strategy: "promptpilot" as const,
-      status: "succeeded" as const,
-      source_message_id: "message-1",
-      provider: "openai",
-      model: "gpt-4",
-      response_text: "PromptPilot response",
-    };
-    expect(
-      comparisonEligibility([baselineRun as never, promptpilotRun as never]),
-    ).toEqual({
-      eligible: true,
-      reason: "Compatible saved responses are available.",
-    });
-  });
+  it("selects succeeded baseline and PromptPilot runs with matching request, provider, and model", () => {
+    const baseline = modelRun("baseline-1", "baseline");
+    const promptpilot = modelRun("promptpilot-1", "promptpilot");
+    const result = selectComparisonPair(
+      [baseline, promptpilot],
+      "message-1",
+      "prompt-version-1",
+    );
 
-  it("recognises a backend-shaped PromptPilot run with status succeeded", () => {
-    const run = {
-      id: "promptpilot-run-1",
-      execution_strategy: "promptpilot" as const,
-      status: "succeeded" as const,
-      source_message_id: "message-1",
-      provider: "openai",
-      model: "gpt-4",
-      response_text: "PromptPilot response",
-    };
-    expect(comparisonEligibility([run as never])).toEqual({
-      eligible: false,
-      reason: "A succeeded baseline response is missing.",
-    });
-  });
-
-  it("recognises a compatible baseline and PromptPilot pair as eligible for comparison", () => {
-    const runs = [
-      {
-        id: "baseline-run-1",
-        execution_strategy: "baseline" as const,
-        status: "succeeded" as const,
-        source_message_id: "message-1",
-        provider: "openai",
-        model: "gpt-4",
-        response_text: "Baseline response",
-      },
-      {
-        id: "promptpilot-run-1",
-        execution_strategy: "promptpilot" as const,
-        status: "succeeded" as const,
-        source_message_id: "message-1",
-        provider: "openai",
-        model: "gpt-4",
-        response_text: "PromptPilot response",
-      },
-    ];
-    const result = comparisonEligibility(runs as never);
     expect(result.eligible).toBe(true);
-    expect(result.reason).toBe("Compatible saved responses are available.");
+    if (result.eligible) {
+      expect(result.pair).toEqual({ baseline, promptpilot });
+    }
   });
 
-  it("rejects failed runs as ineligible", () => {
-    const runs = [
-      {
-        id: "failed-run",
-        execution_strategy: "baseline" as const,
-        status: "failed" as const,
-        source_message_id: "message-1",
-        provider: "openai",
-        model: "gpt-4",
-        response_text: null,
-        error_message: "Provider unavailable",
-      },
-    ];
-    expect(comparisonEligibility(runs as never)).toEqual({
+  it("rejects runs from different source messages", () => {
+    const result = selectComparisonPair(
+      [
+        modelRun("baseline-1", "baseline"),
+        modelRun("promptpilot-1", "promptpilot", {
+          source_message_id: "message-2",
+        }),
+      ],
+      "message-1",
+      "prompt-version-1",
+    );
+
+    expect(result).toMatchObject({
       eligible: false,
-      reason: "A succeeded baseline response is missing.",
+      reason: "No compatible response pair is available.",
+      pair: null,
     });
   });
 
-  it("rejects pending or unknown statuses as ineligible", () => {
-    const pendingRuns = [
-      {
-        id: "pending-run",
-        execution_strategy: "baseline" as const,
-        status: "pending" as unknown as "succeeded" | "failed",
-        source_message_id: "message-1",
-        provider: "openai",
-        model: "gpt-4",
-        response_text: null,
-      },
-    ];
-    const unknownRuns = [
-      {
-        ...pendingRuns[0],
-        id: "unknown-run",
-        status: "unknown" as never,
-      },
-    ];
-    expect(comparisonEligibility(pendingRuns as never)).toEqual({
+  it("rejects runs from different providers", () => {
+    const result = selectComparisonPair(
+      [
+        modelRun("baseline-1", "baseline"),
+        modelRun("promptpilot-1", "promptpilot", { provider: "anthropic" }),
+      ],
+      "message-1",
+      "prompt-version-1",
+    );
+
+    expect(result).toMatchObject({
       eligible: false,
-      reason: "A succeeded baseline response is missing.",
+      reason: "The saved responses use different providers or models.",
+      pair: null,
     });
-    expect(comparisonEligibility(unknownRuns as never)).toEqual({
+  });
+
+  it("rejects runs from different models", () => {
+    const result = selectComparisonPair(
+      [
+        modelRun("baseline-1", "baseline"),
+        modelRun("promptpilot-1", "promptpilot", { model: "gpt-4.1" }),
+      ],
+      "message-1",
+      "prompt-version-1",
+    );
+
+    expect(result).toMatchObject({
       eligible: false,
-      reason: "A succeeded baseline response is missing.",
+      reason: "The saved responses use different providers or models.",
+      pair: null,
+    });
+  });
+
+  it("requires a successful baseline response", () => {
+    const result = selectComparisonPair(
+      [
+        modelRun("baseline-1", "baseline", {
+          status: "failed",
+          response_text: null,
+        }),
+        modelRun("promptpilot-1", "promptpilot"),
+      ],
+      "message-1",
+      "prompt-version-1",
+    );
+
+    expect(result).toMatchObject({
+      eligible: false,
+      reason: "A successful baseline response is required.",
+      pair: null,
+    });
+  });
+
+  it("requires a successful PromptPilot response", () => {
+    const result = selectComparisonPair(
+      [
+        modelRun("baseline-1", "baseline"),
+        modelRun("promptpilot-1", "promptpilot", {
+          status: "failed",
+          response_text: null,
+        }),
+      ],
+      "message-1",
+      "prompt-version-1",
+    );
+
+    expect(result).toMatchObject({
+      eligible: false,
+      reason: "A successful PromptPilot response is required.",
+      pair: null,
+    });
+  });
+
+  it("rejects pending or unknown statuses received at runtime", () => {
+    for (const status of ["pending", "unknown"]) {
+      const result = selectComparisonPair(
+        [
+          runtimeStatusRun(modelRun("baseline-1", "baseline"), status),
+          modelRun("promptpilot-1", "promptpilot"),
+        ],
+        "message-1",
+        "prompt-version-1",
+      );
+
+      expect(result).toMatchObject({
+        eligible: false,
+        reason: "A successful baseline response is required.",
+        pair: null,
+      });
+    }
+  });
+
+  it("selects a compatible historical pair instead of combining unrelated latest runs", () => {
+    const latestBaseline = modelRun("baseline-latest", "baseline", {
+      provider: "openai",
+      model: "gpt-4.1",
+    });
+    const olderCompatibleBaseline = modelRun(
+      "baseline-compatible",
+      "baseline",
+      { provider: "anthropic", model: "claude-3" },
+    );
+    const latestPromptpilot = modelRun("promptpilot-latest", "promptpilot", {
+      provider: "anthropic",
+      model: "claude-3",
+    });
+    const olderCompatiblePromptpilot = modelRun(
+      "promptpilot-compatible",
+      "promptpilot",
+      { provider: "openai", model: "gpt-4.1" },
+    );
+    const result = selectComparisonPair(
+      [
+        latestBaseline,
+        olderCompatibleBaseline,
+        latestPromptpilot,
+        olderCompatiblePromptpilot,
+      ],
+      "message-1",
+      "prompt-version-1",
+    );
+
+    expect(result.eligible).toBe(true);
+    if (result.eligible) {
+      expect(result.pair).toEqual({
+        baseline: latestBaseline,
+        promptpilot: olderCompatiblePromptpilot,
+      });
+    }
+  });
+
+  it("uses the selected pair's exact run IDs in the comparison request", async () => {
+    const baseline = modelRun("baseline-selected", "baseline");
+    const promptpilot = modelRun("promptpilot-selected", "promptpilot");
+    const selection = selectComparisonPair(
+      [baseline, promptpilot],
+      "message-1",
+      "prompt-version-1",
+    );
+    expect(selection.eligible).toBe(true);
+    if (!selection.eligible) return;
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response({ id: "evaluation-1" }));
+    await compareEvaluations("conversation-1", selection.pair);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      baseline_model_run_id: baseline.id,
+      promptpilot_model_run_id: promptpilot.id,
+      method: "heuristic",
+    });
+    fetchMock.mockRestore();
+  });
+
+  it("requires the active generated prompt for the PromptPilot side", () => {
+    const result = selectComparisonPair(
+      [
+        modelRun("baseline-1", "baseline"),
+        modelRun("promptpilot-old", "promptpilot", {
+          prompt_version_id: "prompt-version-old",
+        }),
+      ],
+      "message-1",
+      "prompt-version-1",
+    );
+
+    expect(result).toMatchObject({
+      eligible: false,
+      reason: "No compatible response pair is available.",
+      pair: null,
     });
   });
 
