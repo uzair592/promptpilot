@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { getProject } from "../../../lib/projects";
+import { getProject, ProjectApiError } from "../../../lib/projects";
 import { ConversationWorkspace } from "./ConversationWorkspace";
 
 type ProjectDetail = {
@@ -18,13 +18,20 @@ type ProjectDetail = {
 
 export default function ProjectPage() {
   const params = useParams<{ projectId: string }>();
+  const router = useRouter();
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     getProject(params.projectId)
       .then(setProject)
-      .catch(() => setError("Project not found or unavailable."));
-  }, [params.projectId]);
+      .catch((loadError) => {
+        if (loadError instanceof ProjectApiError && loadError.status === 401) {
+          router.replace("/login");
+          return;
+        }
+        setError("Project not found or unavailable.");
+      });
+  }, [params.projectId, router]);
   async function archive() {
     const response = await fetch(
       `/api/v1/projects/${params.projectId}/archive`,

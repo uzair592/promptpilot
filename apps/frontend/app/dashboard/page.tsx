@@ -18,17 +18,14 @@ export default function DashboardPage() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/v1/auth/me", { credentials: "include" }),
-      getProjects(),
-    ])
-      .then(async ([userResponse, loadedProjects]) => {
+    fetch("/api/v1/auth/me", { credentials: "include" })
+      .then(async (userResponse) => {
         if (!userResponse.ok) {
           router.replace("/login");
           return;
         }
         setUser((await userResponse.json()).user);
-        setProjects(loadedProjects);
+        setProjects(await getProjects());
         setLoading(false);
       })
       .catch(() => {

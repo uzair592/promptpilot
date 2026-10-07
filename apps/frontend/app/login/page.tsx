@@ -4,8 +4,11 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { useGuestRoute } from "../../lib/use-guest-route";
+
 export default function LoginPage() {
   const router = useRouter();
+  useGuestRoute();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -27,7 +30,7 @@ export default function LoginPage() {
       setError("We could not sign you in with those details.");
       return;
     }
-    router.push("/dashboard");
+    router.replace("/dashboard");
   }
   return (
     <main className="shell">
