@@ -30,7 +30,6 @@ jobs:
       - name: Enable pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 11.10.0
           run_install: false
 
       - name: Install Node.js
@@ -40,7 +39,7 @@ jobs:
           cache: pnpm
 
       - name: Verify pnpm version
-        run: test "$(pnpm --version)" = "11.10.0"
+        run: test "$(pnpm --version)" = "10.34.6"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -189,7 +188,6 @@ jobs:
       - name: Enable pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 11.10.0
           run_install: false
 
       - name: Install Node.js
@@ -199,7 +197,7 @@ jobs:
           cache: pnpm
 
       - name: Verify pnpm version
-        run: test "$(pnpm --version)" = "11.10.0"
+        run: test "$(pnpm --version)" = "10.34.6"
 
       - name: Install JavaScript dependencies
         run: pnpm install --frozen-lockfile
