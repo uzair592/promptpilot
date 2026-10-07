@@ -53,6 +53,7 @@ test("registers, completes, and restores the persistent product workflow", async
   expect(new URL(loggedOut.url()).origin).toBe(new URL(page.url()).origin);
   expect(loggedOut.headers()["cache-control"]).toContain("no-store");
   await expect(page).toHaveURL(/\/login$/);
+  await page.waitForLoadState("load");
   expect((await page.request.get("/api/v1/auth/me")).status()).toBe(401);
 
   await page.getByLabel("Email").fill(email);

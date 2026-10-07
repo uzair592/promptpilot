@@ -42,7 +42,7 @@ export default function DashboardPage() {
       method: "POST",
       credentials: "include",
     });
-    router.replace("/login");
+    window.location.assign("/login");
   }
   async function submitProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
