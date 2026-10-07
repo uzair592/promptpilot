@@ -1,12 +1,39 @@
+import { mkdirSync } from "node:fs";
+
 import { expect, test } from "@playwright/test";
 
-test("registers, completes, and restores the persistent product workflow", async ({
+test("routes from root and restores an authenticated product workflow", async ({
   page,
 }) => {
   const email = `acceptance-${Date.now()}@example.com`;
   const password = "acceptance-test-password";
+  const screenshotDirectory = "test-results/screenshots";
+  mkdirSync(screenshotDirectory, { recursive: true });
 
-  await page.goto("/register");
+  const rootNavigation = await page.goto("/");
+  expect(rootNavigation).not.toBeNull();
+  expect(rootNavigation?.status()).not.toBe(404);
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByText("This page could not be found")).toHaveCount(0);
+  await page.screenshot({
+    path: `${screenshotDirectory}/root-after-redirect.png`,
+    fullPage: true,
+  });
+
+  await page.goto("/login");
+  await expect(
+    page.getByRole("heading", { name: "PromptPilot" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: `${screenshotDirectory}/login.png`,
+    fullPage: true,
+  });
+  await page.getByRole("link", { name: "Create an account" }).click();
+  await expect(page).toHaveURL(/\/register$/);
+  await page.screenshot({
+    path: `${screenshotDirectory}/registration.png`,
+    fullPage: true,
+  });
   await page.getByLabel("Display name").fill("Acceptance User");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
@@ -18,7 +45,15 @@ test("registers, completes, and restores the persistent product workflow", async
   expect(response.status()).toBe(201);
   expect(new URL(response.url()).origin).toBe(new URL(page.url()).origin);
   expect(response.headers()["cache-control"]).toContain("no-store");
-  await page.goto("/dashboard");
+  await expect(
+    page.getByRole("heading", { name: "Welcome, Acceptance User" }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: `${screenshotDirectory}/dashboard.png`,
+    fullPage: true,
+  });
+
+  await page.reload();
   await expect(
     page.getByRole("heading", { name: "Welcome, Acceptance User" }),
   ).toBeVisible();
@@ -56,6 +91,15 @@ test("registers, completes, and restores the persistent product workflow", async
   await page.waitForLoadState("load");
   expect((await page.request.get("/api/v1/auth/me")).status()).toBe(401);
 
+  for (const protectedPath of [
+    "/dashboard",
+    "/projects",
+    "/projects/00000000-0000-0000-0000-000000000000",
+  ]) {
+    await page.goto(protectedPath);
+    await expect(page).toHaveURL(/\/login$/);
+  }
+
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   const loginResponse = page.waitForResponse(
@@ -72,6 +116,11 @@ test("registers, completes, and restores the persistent product workflow", async
     page.getByRole("heading", { name: "Welcome, Acceptance User" }),
   ).toBeVisible();
   expect((await page.request.get("/api/v1/auth/me")).status()).toBe(200);
+
+  await page.goto("/");
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await page.goto("/projects");
+  await expect(page).toHaveURL(/\/dashboard$/);
 
   await page.getByRole("button", { name: "New project" }).click();
   const projectDialog = page.getByRole("dialog");

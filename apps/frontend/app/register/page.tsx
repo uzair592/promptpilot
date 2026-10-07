@@ -4,8 +4,11 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { useGuestRoute } from "../../lib/use-guest-route";
+
 export default function RegisterPage() {
   const router = useRouter();
+  useGuestRoute();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -33,7 +36,7 @@ export default function RegisterPage() {
       setError("We could not create that account.");
       return;
     }
-    router.push("/dashboard");
+    router.replace("/dashboard");
   }
   return (
     <main className="shell">

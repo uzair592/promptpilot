@@ -9,11 +9,21 @@ export type Project = {
   updated_at: string;
 };
 
+export class ProjectApiError extends Error {
+  constructor(public readonly status: number) {
+    super("Project request failed");
+  }
+}
+
+async function requireOk(response: Response): Promise<Response> {
+  if (!response.ok) throw new ProjectApiError(response.status);
+  return response;
+}
+
 export async function getProjects(): Promise<Project[]> {
-  const response = await fetch("/api/v1/projects", {
-    credentials: "include",
-  });
-  if (!response.ok) throw new Error("Could not load projects");
+  const response = await requireOk(
+    await fetch("/api/v1/projects", { credentials: "include" }),
+  );
   return (await response.json()).items as Project[];
 }
 
@@ -22,20 +32,20 @@ export async function createProject(input: {
   description: string;
   domain: string;
 }): Promise<Project> {
-  const response = await fetch("/api/v1/projects", {
-    method: "POST",
-    credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) throw new Error("Could not create project");
+  const response = await requireOk(
+    await fetch("/api/v1/projects", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    }),
+  );
   return (await response.json()) as Project;
 }
 
 export async function getProject(id: string) {
-  const response = await fetch(`/api/v1/projects/${id}`, {
-    credentials: "include",
-  });
-  if (!response.ok) throw new Error("Could not load project");
+  const response = await requireOk(
+    await fetch(`/api/v1/projects/${id}`, { credentials: "include" }),
+  );
   return response.json();
 }
