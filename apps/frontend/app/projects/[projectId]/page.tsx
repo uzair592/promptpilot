@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { apiBaseUrl, getProject } from "../../../lib/projects";
+import { getProject } from "../../../lib/projects";
 import { ConversationWorkspace } from "./ConversationWorkspace";
 
 type ProjectDetail = {
@@ -27,7 +27,7 @@ export default function ProjectPage() {
   }, [params.projectId]);
   async function archive() {
     const response = await fetch(
-      `${apiBaseUrl}/api/v1/projects/${params.projectId}/archive`,
+      `/api/v1/projects/${params.projectId}/archive`,
       { method: "POST", credentials: "include" },
     );
     if (response.ok) setProject(await response.json());

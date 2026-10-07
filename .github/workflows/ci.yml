@@ -55,13 +55,23 @@ jobs:
         run: pnpm test
 
       - name: Build frontend
+        env:
+          BACKEND_ORIGIN: https://api.example.invalid
         run: pnpm --filter @promptpilot/frontend build
 
       - name: Check formatting
         run: >-
           pnpm exec prettier --check .github/workflows/ci.yml README.md
-          apps/frontend/README.md package.json playwright.config.ts
-          tests/acceptance/run.mjs
+          apps/backend/README.md apps/frontend/README.md
+          docs/production-deployment.md render.yaml package.json
+          playwright.config.ts tests/acceptance/run.mjs
+          apps/frontend/next.config.ts apps/frontend/lib/auth.ts
+          apps/frontend/lib/conversations.ts apps/frontend/lib/projects.ts
+          apps/frontend/app/dashboard/page.tsx apps/frontend/app/login/page.tsx
+          apps/frontend/app/register/page.tsx
+          "apps/frontend/app/projects/[projectId]/page.tsx"
+          tests/frontend-auth.test.ts tests/frontend-conversations.test.ts
+          tests/frontend-projects.test.ts
 
       - name: Check patch whitespace
         run: git diff --check HEAD^ HEAD
@@ -224,3 +234,113 @@ jobs:
             playwright-report/
           if-no-files-found: ignore
           retention-days: 5
+
+  production-readiness:
+    name: Production install and PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: promptpilot
+          POSTGRES_USER: promptpilot
+          POSTGRES_PASSWORD: promptpilot-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U promptpilot -d promptpilot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/backend/pyproject.toml
+
+      - name: Install production dependencies only
+        working-directory: apps/backend
+        run: python -m pip install .
+
+      - name: Apply and verify PostgreSQL migrations
+        working-directory: apps/backend
+        env:
+          APP_ENV: production
+          DATABASE_URL: postgresql+psycopg://promptpilot:promptpilot-ci-only@localhost:5432/promptpilot
+          CORS_ORIGINS: https://promptpilot.example
+          STORAGE_PATH: ${{ runner.temp }}/promptpilot-ci-storage
+        run: |
+          python -m alembic upgrade head
+          python -m alembic check
+
+      - name: Smoke-test production startup and health endpoints
+        working-directory: apps/backend
+        env:
+          APP_ENV: production
+          DATABASE_URL: postgresql+psycopg://promptpilot:promptpilot-ci-only@localhost:5432/promptpilot
+          CORS_ORIGINS: https://promptpilot.example
+          STORAGE_PATH: ${{ runner.temp }}/promptpilot-ci-storage
+        run: |
+          python - <<'PY'
+          import subprocess
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+
+          server = subprocess.Popen(
+              [
+                  sys.executable,
+                  "-m",
+                  "uvicorn",
+                  "promptpilot_backend.main:app",
+                  "--host",
+                  "127.0.0.1",
+                  "--port",
+                  "8133",
+              ],
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+              text=True,
+          )
+          succeeded = False
+          try:
+              deadline = time.monotonic() + 30
+              while time.monotonic() < deadline:
+                  if server.poll() is not None:
+                      raise RuntimeError(
+                          f"Uvicorn exited early with status {server.returncode}"
+                      )
+                  try:
+                      for path in ("/healthz", "/readyz"):
+                          with urllib.request.urlopen(
+                              f"http://127.0.0.1:8133{path}", timeout=3
+                          ) as response:
+                              if response.status != 200:
+                                  raise RuntimeError(
+                                      f"Unexpected {path} status: {response.status}"
+                                  )
+                      print("Production startup smoke passed: /healthz and /readyz returned 200")
+                      succeeded = True
+                      break
+                  except (urllib.error.URLError, TimeoutError):
+                      time.sleep(0.25)
+              if not succeeded:
+                  raise TimeoutError("Production health endpoints did not become ready")
+          finally:
+              if server.poll() is None:
+                  server.terminate()
+                  try:
+                      server.wait(timeout=10)
+                  except subprocess.TimeoutExpired:
+                      server.kill()
+                      server.wait(timeout=10)
+              if not succeeded and server.stdout is not None:
+                  print(server.stdout.read(), file=sys.stderr)
+          PY

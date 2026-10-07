@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import create_session, hash_password, normalize_email, revoke_session, verify_password
+from .auth_rate_limit import enforce_auth_rate_limit
 from .config import get_settings
 from .db import get_db
 from .dependencies import current_user
@@ -33,6 +34,7 @@ def register(
     payload: RegisterRequest, response: Response, db: Session = Depends(get_db)
 ) -> AuthResponse:
     normalized = normalize_email(str(payload.email))
+    enforce_auth_rate_limit(db, normalized)
     if db.scalar(select(User).where(User.normalized_email == normalized)):
         raise HTTPException(status_code=409, detail="An account with these details already exists")
     user = User(
@@ -56,8 +58,10 @@ def register(
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> AuthResponse:
+    normalized = normalize_email(str(payload.email))
+    enforce_auth_rate_limit(db, normalized)
     user = db.scalar(
-        select(User).where(User.normalized_email == normalize_email(str(payload.email)))
+        select(User).where(User.normalized_email == normalized)
     )
     if (
         user is None

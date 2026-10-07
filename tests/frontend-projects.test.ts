@@ -15,10 +15,9 @@ describe("frontend project API helpers", () => {
     await expect(getProjects()).resolves.toEqual([
       { id: "project-1", name: "Demo" },
     ]);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/v1/projects",
-      { credentials: "include" },
-    );
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/projects", {
+      credentials: "include",
+    });
     fetchMock.mockRestore();
   });
 
@@ -32,7 +31,7 @@ describe("frontend project API helpers", () => {
       createProject({ name: "Demo", description: "", domain: "General Task" }),
     ).resolves.toEqual({ id: "project-1", name: "Demo" });
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/v1/projects",
+      "/api/v1/projects",
       expect.objectContaining({ method: "POST", credentials: "include" }),
     );
     fetchMock.mockRestore();

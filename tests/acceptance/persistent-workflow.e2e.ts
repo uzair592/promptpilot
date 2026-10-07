@@ -15,11 +15,62 @@ test("registers, completes, and restores the persistent product workflow", async
   );
   await page.getByRole("button", { name: "Create account" }).click();
   const response = await registrationResponse;
-  expect(response.status(), await response.text()).toBe(201);
+  expect(response.status()).toBe(201);
+  expect(new URL(response.url()).origin).toBe(new URL(page.url()).origin);
+  expect(response.headers()["cache-control"]).toContain("no-store");
   await page.goto("/dashboard");
   await expect(
     page.getByRole("heading", { name: "Welcome, Acceptance User" }),
   ).toBeVisible();
+
+  const registeredCookies = await page.context().cookies();
+  expect(
+    registeredCookies.some(
+      (cookie) =>
+        cookie.name === "promptpilot_acceptance_session" && cookie.httpOnly,
+    ),
+  ).toBe(true);
+
+  const frontendHealth = await page.request.get("/healthz");
+  expect(frontendHealth.status()).toBe(404);
+  const attemptedOpenProxy = await page.request.get(
+    "/api/v1/http://127.0.0.1:8132/health",
+  );
+  expect(attemptedOpenProxy.status()).toBe(404);
+  const providerBeforeWorkflow = await page.request.get(
+    "http://127.0.0.1:8132/health",
+  );
+  expect((await providerBeforeWorkflow.json()).request_count).toBe(0);
+
+  const logoutResponse = page.waitForResponse(
+    (candidate) =>
+      candidate.url().endsWith("/api/v1/auth/logout") &&
+      candidate.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Log out" }).click();
+  const loggedOut = await logoutResponse;
+  expect(loggedOut.status()).toBe(204);
+  expect(new URL(loggedOut.url()).origin).toBe(new URL(page.url()).origin);
+  expect(loggedOut.headers()["cache-control"]).toContain("no-store");
+  await expect(page).toHaveURL(/\/login$/);
+  expect((await page.request.get("/api/v1/auth/me")).status()).toBe(401);
+
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  const loginResponse = page.waitForResponse(
+    (candidate) =>
+      candidate.url().endsWith("/api/v1/auth/login") &&
+      candidate.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Sign in" }).click();
+  const loggedIn = await loginResponse;
+  expect(loggedIn.status()).toBe(200);
+  expect(new URL(loggedIn.url()).origin).toBe(new URL(page.url()).origin);
+  expect(loggedIn.headers()["cache-control"]).toContain("no-store");
+  await expect(
+    page.getByRole("heading", { name: "Welcome, Acceptance User" }),
+  ).toBeVisible();
+  expect((await page.request.get("/api/v1/auth/me")).status()).toBe(200);
 
   await page.getByRole("button", { name: "New project" }).click();
   const projectDialog = page.getByRole("dialog");
@@ -34,7 +85,7 @@ test("registers, completes, and restores the persistent product workflow", async
   );
   await projectDialog.getByRole("button", { name: "Create project" }).click();
   const createdProject = await projectResponse;
-  expect(createdProject.status(), await createdProject.text()).toBe(201);
+  expect(createdProject.status()).toBe(201);
   const project = (await createdProject.json()) as { id: string };
   await page.goto(`/projects/${project.id}`);
   await expect(
@@ -55,7 +106,18 @@ test("registers, completes, and restores the persistent product workflow", async
   await page
     .getByRole("textbox", { name: "Request" })
     .fill("Create a clear, concise plan for launching a community workshop.");
+  const savedRequest = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/v1/conversations/") &&
+      response.url().endsWith("/messages") &&
+      response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Save request" }).click();
+  expect((await savedRequest).status()).toBe(201);
+  await page
+    .getByRole("navigation", { name: "Prompt workflow" })
+    .getByRole("button", { name: /Request/ })
+    .click();
   await expect(
     page.getByText("Create a clear, concise plan", { exact: false }),
   ).toBeVisible();

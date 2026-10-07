@@ -1,5 +1,3 @@
-import { apiBaseUrl } from "./projects";
-
 export type Conversation = {
   id: string;
   project_id: string;
@@ -296,7 +294,7 @@ export class ApiError extends Error {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(path, {
     credentials: "include",
     ...init,
     headers: {

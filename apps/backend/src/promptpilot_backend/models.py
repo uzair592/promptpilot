@@ -57,6 +57,14 @@ class SessionToken(Base):
     user: Mapped[User] = relationship(back_populates="sessions")
 
 
+class AuthRateLimitCounter(Base):
+    __tablename__ = "auth_rate_limit_counters"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class Project(Base):
     __tablename__ = "projects"
 

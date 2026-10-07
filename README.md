@@ -21,7 +21,7 @@ In a second terminal, from the repository root:
 pnpm --filter @promptpilot/frontend dev
 ```
 
-Open `http://localhost:3000`, register or sign in, create a project and conversation, then follow the eight workspace stages: Request, Analysis, Clarify, Evidence, Context, Generated prompt, Execution, and Evaluation. The frontend expects the API at `http://localhost:8000`; set `NEXT_PUBLIC_API_BASE_URL` to override it.
+Open `http://localhost:3000`, register or sign in, create a project and conversation, then follow the eight workspace stages: Request, Analysis, Clarify, Evidence, Context, Generated prompt, Execution, and Evaluation. Next.js proxies same-origin `/api/v1` requests to `BACKEND_ORIGIN` (defaulting to `http://localhost:8000` during development).
 
 Analysis and clarification have deterministic offline paths. Prompt generation and target-model execution require server-side provider configuration (`LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`). When unavailable, the UI reports that state and does not manufacture a model response. Credentials are never entered in the browser. Heuristic evaluation can compare compatible persisted runs without a judge provider; an LLM-judge method requires its configured provider.
 
@@ -59,3 +59,5 @@ The browser test creates and removes its own temporary database and captures
 diagnostic artifacts under ignored Playwright output directories.
 
 Product functionality and research evidence are separate. A working product flow does not establish that PromptPilot improves model responses. The guarded benchmark and live-study code has additional frozen protocols, approval boundaries, call ceilings, and provenance requirements; ordinary product use does not authorize or run a study.
+
+See [the production deployment guide](docs/production-deployment.md) for the Vercel/Render topology, required settings, migration sequence, backup boundaries, and deployment safety notes.

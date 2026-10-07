@@ -4,9 +4,6 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-
 export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState("");
@@ -16,7 +13,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     const form = new FormData(event.currentTarget);
-    const response = await fetch(`${apiBaseUrl}/api/v1/auth/login`, {
+    const response = await fetch("/api/v1/auth/login", {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
