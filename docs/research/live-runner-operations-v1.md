@@ -44,7 +44,8 @@ been run.
 | Results and export contract | `benchmark_experiment_results.py` | Immutable per-unit provenance, four explicit dispositions, score-free blinded review samples separated from human review records, export plus `ExportLock`. |
 | Analysis and dry-run planning | `benchmark_experiment_analysis.py` | Deterministic aggregation over frozen strata and the offline workload plan. |
 | Study preparation and readiness | `benchmark_study_preparation.py` | The deterministic human-input checklist, the canonical content-addressed study configuration, and the offline preparation/staging rehearsal. Never manufactures a human decision. |
-| Operational CLI | `benchmark_live_runner_cli.py` | `validate`, `dry-run`, `stage`, `inspect`, `launch-gate`, `validate-study`, `inspect-study`, `validate-fixtures`, `validate-pricing`, and `stage-study`. No `run` command. |
+| Production fixture intake | `benchmark_fixture_intake.py` | Audits the 8 frozen tasks, writes intentionally-incomplete `experimental_candidate` fixture templates, and reports the per-fixture human fill-in checklist. Never manufactures a human review. |
+| Operational CLI | `benchmark_live_runner_cli.py` | `validate`, `dry-run`, `stage`, `inspect`, `launch-gate`, `validate-study`, `inspect-study`, `validate-fixtures`, `validate-pricing`, `stage-study`, `intake`, `intake-report`, and `intake-generate`. No `run` command. |
 
 ## Execution modes
 
@@ -204,6 +205,112 @@ the report still claims readiness.
 * `BenchmarkExperimentRun.external_human_approval_verified` remains constrained
   to `false` by a database CHECK constraint, and `HumanApprovalBoundary` still
   refuses `externally_verified = true`. Neither was weakened.
+
+## Production fixture intake
+
+`benchmark_fixture_intake.py` turns the existing frozen benchmark
+dataset into a clean real-fixture intake package. It is preparation
+tooling only: it never executes the study, never contacts a provider,
+never spends credits, and never manufactures a human decision.
+
+### Frozen task inventory
+
+`audit_frozen_tasks` reproduces the 8 canonical tasks exactly as they
+appear in `benchmark_dataset.json`. The task text is never modified,
+rewritten, reordered, or improved. Each inventory entry carries the
+task id, category, difficulty, task text, objective, requirements,
+constraints, expected output characteristics, available context,
+reference, and a verified `task_text_sha256`.
+
+### Production fixture templates
+
+`build_production_fixture_template` writes one
+`experimental_candidate` fixture per frozen task using the existing
+`FixtureManifest` schema. Each template is **intentionally
+incomplete**:
+
+* `fixture_kind = experimental_candidate`
+* `review.status = pending`
+* `reviewer_id = null`, `reviewed_at = null`
+* the exact original task from the dataset (with a verified content
+  hash) and a `dataset_original` provenance record
+* empty `project_facts`, `clarification_answers`, `frozen_documents`,
+  and `evaluation_only`
+
+A pending fixture is therefore **not live-eligible** and cannot be
+admitted. The human must supply genuine project facts, clarification
+answers, frozen documents, evaluation-only criteria (as applicable),
+reviewer identity, review timestamp, and provenance/consent evidence.
+
+The 8 templates live in `tests/fixtures/production_pipeline/` as
+`production-<task-id>.json`. They are versioned, inspectable JSON
+files that a human fills in without touching implementation code.
+
+### Human fill-in checklist
+
+`build_fixture_checklist` reports, for every frozen task:
+
+| Field | Meaning |
+|---|---|
+| `fixture_id` | The derived production fixture id. |
+| `task_id` | The frozen task id. |
+| `task_category` | The frozen task category. |
+| `fixture_exists` | Whether the production fixture template exists. |
+| `task_matches_frozen_dataset` | Whether the fixture task id and text match the frozen dataset. |
+| `manifest_hash` | The content-addressed manifest hash. |
+| `task_provenance_available` | Whether the original-task provenance is `dataset_original` (the frozen task came from the canonical dataset). |
+| `production_fixture_evidence_supplied` | Whether a human supplied genuine production-fixture evidence (project facts, clarification answers, frozen documents, evaluation-only criteria, as applicable). The canonical dataset task itself never counts as this evidence. |
+| `reviewer_supplied` | Whether a reviewer identity is present. |
+| `review_timestamp_supplied` | Whether a review timestamp is present. |
+| `review_status` | `pending` or `human_approved`. |
+| `live_eligible` | Whether the fixture is live-eligible. |
+| `missing_fields` | The exact fields the human must still supply. |
+| `blocker_codes` | The machine-readable blocker codes. |
+
+### Intake report
+
+`build_intake_report` (CLI: `intake`, `intake-report`) audits the 8
+frozen tasks, builds the per-fixture checklist, and reports the
+overall intake state. It never implies the study is ready while
+human-controlled inputs are missing:
+
+```
+Production Study Fixture Intake
+
+01 writing-email-001 (writing) ........ READY
+...
+08 research-information-001 (research_information) ........ READY
+
+Genuine fixture evidence ........ PENDING
+Human review .................... PENDING
+Live eligibility ................ BLOCKED
+```
+
+`dataset_original` only proves the frozen task came from
+the canonical dataset. It is **not** genuine production-
+fixture evidence: that evidence stays `PENDING` until a
+human supplies the fixture-specific context, facts, answers,
+documents, evaluation-only information, and provenance/
+consent evidence the production study requires. The 8
+current templates are intentionally incomplete and therefore
+remain blocked.
+
+### Synthetic fixtures stay separate
+
+The synthetic fixtures (`synthetic_manifest.json`,
+`synthetic_protocol.json`, `synthetic_workshop.txt`) remain
+`synthetic_offline_test` with `synthetic` review status. They are
+permanently not live-eligible and are never converted into
+production fixtures. The `production-` prefix distinguishes real
+fixture templates from the `synthetic-` test artifacts.
+
+### Intake CLI
+
+| Command | Purpose |
+|---|---|
+| `intake` | Audit the 8 frozen tasks and emit the machine-readable checklist JSON. |
+| `intake-report` | Render the deterministic human-readable intake report. |
+| `intake-generate` | Write the 8 production fixture templates (intentionally incomplete). |
 
 ## Offline dry run
 
@@ -402,6 +509,9 @@ Benchmark safety/budget ledger: IMPLEMENTED AND OFFLINE-VALIDATED
 Study preparation and readiness checklist: IMPLEMENTED AND OFFLINE-VALIDATED
 Canonical study configuration artifact: IMPLEMENTED
 Offline preparation/staging rehearsal: IMPLEMENTED (zero network, zero cost)
+Production fixture intake: IMPLEMENTED (8 templates, intentionally incomplete)
+8 frozen tasks: READY
+8 genuine reviewed fixtures: PENDING
 Controlled live pilot: NOT RUN
 Validated benchmark results: NOT ESTABLISHED
 General PromptPilot superiority claim: NOT MADE

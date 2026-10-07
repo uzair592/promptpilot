@@ -11,6 +11,9 @@ This CLI provides safe operations for the guarded live runner:
 - validate-fixtures: Validate every selected fixture manifest offline
 - validate-pricing: Validate the offline, hash-pinned pricing snapshot
 - stage-study: Rehearse the complete preparation/staging workflow offline
+- intake: Audit the 8 frozen tasks and report the fixture-intake checklist
+- intake-report: Render the deterministic production-study fixture intake report
+- intake-generate: Write the 8 production fixture templates (intentionally incomplete)
 
 The live-run operation is deliberately NOT exposed via this CLI. Live
 execution requires a launch-gate report carrying ``ready = true``,
@@ -46,6 +49,14 @@ from .benchmark_experiment_authorization import (
 )
 from .benchmark_experiment_binding import (
     BindingError,
+)
+from .benchmark_fixture_intake import (
+    FixtureIntakeError,
+    build_intake_report,
+    intake_package_sha256,
+    load_production_fixtures,
+    render_intake_report,
+    write_production_fixture_templates,
 )
 from .benchmark_fixtures import (
     load_fixture_manifest,
@@ -538,6 +549,88 @@ def cmd_stage_study(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_intake(args: argparse.Namespace) -> int:
+    """Audit the 8 frozen tasks and report the fixture-intake checklist."""
+    try:
+        dataset = load_dataset(Path(args.dataset))
+        fixtures_dir = (
+            Path(args.fixtures_dir) if args.fixtures_dir else None
+        )
+        manifests = (
+            load_production_fixtures(dataset=dataset, fixtures_dir=fixtures_dir)
+            if fixtures_dir is not None
+            else None
+        )
+        report = build_intake_report(dataset=dataset, manifests=manifests)
+        payload = json.loads(report.model_dump_json())
+        payload["intake_package_sha256"] = intake_package_sha256(report)
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if report.live_eligibility == "eligible" else 1
+    except FixtureIntakeError as e:
+        print(f"Fixture intake failed [{e.code}]: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Fixture intake failed: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_intake_report(args: argparse.Namespace) -> int:
+    """Render the deterministic production-study fixture intake report."""
+    try:
+        dataset = load_dataset(Path(args.dataset))
+        fixtures_dir = (
+            Path(args.fixtures_dir) if args.fixtures_dir else None
+        )
+        manifests = (
+            load_production_fixtures(dataset=dataset, fixtures_dir=fixtures_dir)
+            if fixtures_dir is not None
+            else None
+        )
+        report = build_intake_report(dataset=dataset, manifests=manifests)
+        rendered = render_intake_report(report)
+        print(rendered)
+        if args.output:
+            output_path = Path(args.output)
+            output_path.write_text(rendered + "\n", encoding="utf-8")
+            print(f"Intake report written to {output_path}")
+        return 0 if report.live_eligibility == "eligible" else 1
+    except FixtureIntakeError as e:
+        print(f"Fixture intake failed [{e.code}]: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Fixture intake failed: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_intake_generate(args: argparse.Namespace) -> int:
+    """Write the 8 production fixture templates (intentionally incomplete)."""
+    try:
+        dataset = load_dataset(Path(args.dataset))
+        output_dir = Path(args.output_dir)
+        written = write_production_fixture_templates(
+            dataset=dataset, output_dir=output_dir
+        )
+        payload = {
+            "dataset_name": dataset.name,
+            "fixture_count": len(written),
+            "fixtures": [path.name for path in written],
+            "note": (
+                "Templates are intentionally incomplete experimental_candidate "
+                "fixtures with pending review. They are not live-eligible "
+                "until a genuine human supplies reviewer identity, review "
+                "timestamp, and provenance/consent evidence."
+            ),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    except FixtureIntakeError as e:
+        print(f"Fixture template generation failed [{e.code}]: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Fixture template generation failed: {e}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="PromptPilot Guarded Live Runner CLI",
@@ -601,6 +694,21 @@ Examples:
     --protocol fixtures/production_pipeline/synthetic_protocol.json \\
     --dataset benchmark_dataset.json \\
     --timeout 30
+
+  # Audit the 8 frozen tasks and report the fixture-intake checklist
+  python -m promptpilot_backend.benchmark_live_runner_cli intake \\
+    --dataset benchmark_dataset.json \\
+    --fixtures-dir tests/fixtures/production_pipeline
+
+  # Render the deterministic production-study fixture intake report
+  python -m promptpilot_backend.benchmark_live_runner_cli intake-report \\
+    --dataset benchmark_dataset.json \\
+    --fixtures-dir tests/fixtures/production_pipeline
+
+  # Write the 8 production fixture templates (intentionally incomplete)
+  python -m promptpilot_backend.benchmark_live_runner_cli intake-generate \\
+    --dataset benchmark_dataset.json \\
+    --output-dir tests/fixtures/production_pipeline
         """,
     )
 
@@ -719,6 +827,47 @@ Examples:
     )
     stage_study_parser.add_argument("--output", help="Output file for rehearsal JSON")
     stage_study_parser.set_defaults(func=cmd_stage_study)
+
+    # Intake command
+    intake_parser = subparsers.add_parser(
+        "intake",
+        help="Audit the 8 frozen tasks and report the fixture-intake checklist",
+    )
+    intake_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
+    intake_parser.add_argument(
+        "--fixtures-dir",
+        help="Path to the production-study input directory containing fixture templates",
+    )
+    intake_parser.set_defaults(func=cmd_intake)
+
+    # Intake report command
+    intake_report_parser = subparsers.add_parser(
+        "intake-report",
+        help="Render the deterministic production-study fixture intake report",
+    )
+    intake_report_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
+    intake_report_parser.add_argument(
+        "--fixtures-dir",
+        help="Path to the production-study input directory containing fixture templates",
+    )
+    intake_report_parser.add_argument(
+        "--output",
+        help="Output file for the rendered intake report",
+    )
+    intake_report_parser.set_defaults(func=cmd_intake_report)
+
+    # Intake generate command
+    intake_generate_parser = subparsers.add_parser(
+        "intake-generate",
+        help="Write the 8 production fixture templates (intentionally incomplete)",
+    )
+    intake_generate_parser.add_argument("--dataset", required=True, help="Path to dataset JSON")
+    intake_generate_parser.add_argument(
+        "--output-dir",
+        required=True,
+        help="Directory to write the 8 production fixture templates into",
+    )
+    intake_generate_parser.set_defaults(func=cmd_intake_generate)
 
     args = parser.parse_args()
     func: Callable[[argparse.Namespace], int] = args.func

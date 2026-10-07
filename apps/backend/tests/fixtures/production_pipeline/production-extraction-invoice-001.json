@@ -1,0 +1,29 @@
+{
+  "clarification_answers": [],
+  "dataset_name": "promptpilot-experimental-v1",
+  "dataset_sha256": "8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d",
+  "evaluation_only": [],
+  "fixture_id": "production-extraction-invoice-001",
+  "fixture_kind": "experimental_candidate",
+  "frozen_documents": [],
+  "original_task": {
+    "content": "Extract the invoice number, due date, and total amount from this invoice text: Invoice No. INV-2026-0147. Issued 1 September 2026. Due 30 September 2026. Total due: USD 1,248.50.",
+    "content_sha256": "4e6f92a7089655f6000fb7f4f5484b9635adbba3c0e3147ac22fdf4176b411c3",
+    "fixture_id": "original-task",
+    "provenance": {
+      "description": "Exact task_text from the canonical benchmark dataset",
+      "source_id": "dataset:extraction-invoice-001",
+      "source_type": "dataset_original"
+    },
+    "source_type": "dataset_original",
+    "task_id": "extraction-invoice-001"
+  },
+  "project_facts": [],
+  "review": {
+    "reviewed_at": null,
+    "reviewer_id": null,
+    "status": "pending"
+  },
+  "schema_version": "v1",
+  "task_id": "extraction-invoice-001"
+}

@@ -1,0 +1,29 @@
+{
+  "clarification_answers": [],
+  "dataset_name": "promptpilot-experimental-v1",
+  "dataset_sha256": "8b7aca964ffae59151a3c8c24a3412823b7d96ff7739d66e9b79ab71648cc53d",
+  "evaluation_only": [],
+  "fixture_id": "production-qa-geography-001",
+  "fixture_kind": "experimental_candidate",
+  "frozen_documents": [],
+  "original_task": {
+    "content": "Explain why coastal cities often have milder temperatures than inland cities at the same latitude.",
+    "content_sha256": "1055c0f1b7536521d0eaf6670257fac71645b6f2ccdd4616ad6bd22cc6fa078e",
+    "fixture_id": "original-task",
+    "provenance": {
+      "description": "Exact task_text from the canonical benchmark dataset",
+      "source_id": "dataset:qa-geography-001",
+      "source_type": "dataset_original"
+    },
+    "source_type": "dataset_original",
+    "task_id": "qa-geography-001"
+  },
+  "project_facts": [],
+  "review": {
+    "reviewed_at": null,
+    "reviewer_id": null,
+    "status": "pending"
+  },
+  "schema_version": "v1",
+  "task_id": "qa-geography-001"
+}
