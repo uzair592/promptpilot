@@ -9,11 +9,8 @@ export type Project = {
   updated_at: string;
 };
 
-export const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-
 export async function getProjects(): Promise<Project[]> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/projects`, {
+  const response = await fetch("/api/v1/projects", {
     credentials: "include",
   });
   if (!response.ok) throw new Error("Could not load projects");
@@ -25,7 +22,7 @@ export async function createProject(input: {
   description: string;
   domain: string;
 }): Promise<Project> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/projects`, {
+  const response = await fetch("/api/v1/projects", {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },
@@ -36,7 +33,7 @@ export async function createProject(input: {
 }
 
 export async function getProject(id: string) {
-  const response = await fetch(`${apiBaseUrl}/api/v1/projects/${id}`, {
+  const response = await fetch(`/api/v1/projects/${id}`, {
     credentials: "include",
   });
   if (!response.ok) throw new Error("Could not load project");

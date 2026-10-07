@@ -26,8 +26,8 @@ export function validateLogin(input: {
   return null;
 }
 
-export async function logout(apiBaseUrl: string): Promise<void> {
-  await fetch(`${apiBaseUrl}/api/v1/auth/logout`, {
+export async function logout(): Promise<void> {
+  await fetch("/api/v1/auth/logout", {
     method: "POST",
     credentials: "include",
   });

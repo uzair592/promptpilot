@@ -57,6 +57,14 @@ class SessionToken(Base):
     user: Mapped[User] = relationship(back_populates="sessions")
 
 
+class AuthRateLimitCounter(Base):
+    __tablename__ = "auth_rate_limit_counters"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -389,9 +397,9 @@ class Evaluation(Base):
     evaluator_provider: Mapped[str] = mapped_column(String(80), nullable=False)
     evaluator_model: Mapped[str] = mapped_column(String(160), nullable=False)
     rubric_version: Mapped[str] = mapped_column(String(40), nullable=False)
-    baseline_score: Mapped[float | None] = mapped_column()
-    promptpilot_score: Mapped[float | None] = mapped_column()
-    overall_delta: Mapped[float | None] = mapped_column()
+    baseline_score: Mapped[float | None] = mapped_column(Float)
+    promptpilot_score: Mapped[float | None] = mapped_column(Float)
+    overall_delta: Mapped[float | None] = mapped_column(Float)
     winner: Mapped[str | None] = mapped_column(String(20))
     comparison_summary: Mapped[str | None] = mapped_column(Text)
     baseline_strengths: Mapped[str | None] = mapped_column(Text)

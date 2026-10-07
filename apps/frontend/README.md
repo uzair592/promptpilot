@@ -8,7 +8,7 @@ Install workspace dependencies from the repository root with `pnpm install`, the
 pnpm --filter @promptpilot/frontend dev
 ```
 
-The UI uses cookie-authenticated backend routes and defaults to `http://localhost:8000`. Override that address with `NEXT_PUBLIC_API_BASE_URL`. Start the backend first and open `http://localhost:3000`.
+The UI uses cookie-authenticated same-origin `/api/v1` routes. During local development, Next.js proxies them to `http://localhost:8000`; set the server-only `BACKEND_ORIGIN` to change the origin. Production requires an HTTPS origin. Start the backend first and open `http://localhost:3000`.
 
 Refresh and navigation recovery come from persisted backend records. Context previews are assembled on demand. Prompt generation and live target execution show an unavailable state unless the backend has provider credentials; the frontend never accepts or exposes those credentials and never substitutes fake responses. Evaluation is shown only for persisted runs, and a baseline/PromptPilot comparison requires one persisted `succeeded` run of each strategy.
 

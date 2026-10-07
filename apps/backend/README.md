@@ -1,6 +1,6 @@
 # PromptPilot Backend
 
-The backend now contains the authentication foundation. It remains intentionally limited to identity and session behavior; project and AI features are future vertical slices.
+The FastAPI backend implements the persistent product workflow, authentication, document ingestion, prompt execution, and evaluation.
 
 Boundaries are API routes, application use cases, domain services, persistence, authentication, and future AI/document adapters.
 
@@ -12,7 +12,11 @@ $env:PYTHONPATH = "src"
 python -m uvicorn promptpilot_backend.main:app --reload --port 8000
 ```
 
-The default development database is SQLite when `DATABASE_URL` is omitted. Production and integration environments should use PostgreSQL.
+The default development database is SQLite when `DATABASE_URL` is omitted. Production uses PostgreSQL through psycopg v3 and the checked-in Alembic migrations (`python -m alembic upgrade head`). ORM table creation is limited to development and test startup; production requires the migrated schema. Set `STORAGE_PATH` to a persistent writable directory in production.
+
+Production settings validate the PostgreSQL URL, HTTPS CORS origins, absolute persistent storage, request limits, and all-or-none LLM configuration. LLM credentials are optional for startup. `/healthz` is a process check; `/readyz` verifies database connectivity. Registration and login share database-backed throttling: 20 attempts per normalized account identity per 15-minute window.
+
+For Vercel/Render configuration, migration ordering, backups, and safe rollback guidance, see [the production deployment guide](../../docs/production-deployment.md).
 
 ## Guarded benchmark pricing
 

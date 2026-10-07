@@ -47,14 +47,11 @@ describe("frontend authentication helpers", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 204 }));
-    await logout("http://localhost:8000");
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/v1/auth/logout",
-      {
-        method: "POST",
-        credentials: "include",
-      },
-    );
+    await logout();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/auth/logout", {
+      method: "POST",
+      credentials: "include",
+    });
     fetchMock.mockRestore();
   });
 });

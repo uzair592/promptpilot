@@ -47,7 +47,7 @@ describe("frontend conversation API helpers", () => {
       { role: "user" },
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:8000/api/v1/conversations/conversation-1/messages",
+      "/api/v1/conversations/conversation-1/messages",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({

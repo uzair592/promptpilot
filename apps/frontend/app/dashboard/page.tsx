@@ -4,12 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import {
-  apiBaseUrl,
-  createProject,
-  getProjects,
-  Project,
-} from "../../lib/projects";
+import { createProject, getProjects, Project } from "../../lib/projects";
 
 type User = { display_name: string; email: string };
 
@@ -24,7 +19,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     Promise.all([
-      fetch(`${apiBaseUrl}/api/v1/auth/me`, { credentials: "include" }),
+      fetch("/api/v1/auth/me", { credentials: "include" }),
       getProjects(),
     ])
       .then(async ([userResponse, loadedProjects]) => {
@@ -43,11 +38,11 @@ export default function DashboardPage() {
   }, [router]);
 
   async function logout() {
-    await fetch(`${apiBaseUrl}/api/v1/auth/logout`, {
+    await fetch("/api/v1/auth/logout", {
       method: "POST",
       credentials: "include",
     });
-    router.replace("/login");
+    window.location.assign("/login");
   }
   async function submitProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

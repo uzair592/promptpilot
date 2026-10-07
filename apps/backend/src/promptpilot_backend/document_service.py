@@ -173,6 +173,14 @@ class DocumentService:
     def __init__(self, parser: DocumentParser | None = None) -> None:
         self.parser = parser or BasicDocumentParser()
 
+    @staticmethod
+    def _resolve_storage_path(storage_root: Path, storage_key: str) -> Path:
+        root = storage_root.resolve()
+        target = (root / storage_key).resolve()
+        if not target.is_relative_to(root):
+            raise ValueError("Document storage key is outside the configured storage directory")
+        return target
+
     def ingest_file(self, db: Session, project_id: UUID, name: str, media_type: str, content: bytes, *, source_type: str = "file", source_url: str | None = None, provenance: str | None = None) -> Document:
         extension = Path(name).suffix.lower()
         if extension not in ALLOWED_TYPES or media_type not in {ALLOWED_TYPES[extension], "application/octet-stream"}:
@@ -183,9 +191,13 @@ class DocumentService:
             raise ValueError("File signature does not match its type")
         checksum = hashlib.sha256(content).hexdigest()
         storage_key = f"documents/{project_id}/{uuid4().hex}{extension}"
-        storage_root = Path(get_settings().storage_path)
-        (storage_root / storage_key).parent.mkdir(parents=True, exist_ok=True)
-        (storage_root / storage_key).write_bytes(content)
+        storage_root = Path(get_settings().storage_path).resolve()
+        storage_path = self._resolve_storage_path(storage_root, storage_key)
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        if not storage_path.parent.resolve().is_relative_to(storage_root):
+            raise ValueError("Document storage directory is outside the configured storage path")
+        with storage_path.open("xb") as stored_file:
+            stored_file.write(content)
         document = Document(project_id=project_id, name=Path(name).name, media_type=media_type, source_type=source_type, source_url=source_url, storage_key=storage_key, size_bytes=len(content), checksum=checksum, status="processing")
         db.add(document)
         db.flush()
