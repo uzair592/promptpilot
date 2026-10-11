@@ -136,6 +136,7 @@ def test_routes_preserve_session_creation_skip_contract_and_authorization(client
         "stop_reason",
         "next_question",
         "analysis",
+        "answered_questions",
         "memory_updates",
     }
     with SessionLocal() as db:
