@@ -98,6 +98,13 @@ test("registers, completes, and restores the persistent product workflow", async
     name: "Your prompt is ready",
   });
   for (let count = 0; count < 20; count += 1) {
+    await expect
+      .poll(
+        async () =>
+          (await promptReady.isVisible().catch(() => false)) ||
+          (await skipQuestion.isVisible().catch(() => false)),
+      )
+      .toBe(true);
     if (await promptReady.isVisible().catch(() => false)) break;
     await expect(skipQuestion).toBeVisible();
     const skipped = page.waitForResponse(
