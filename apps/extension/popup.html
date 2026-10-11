@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>PromptPilot</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <div class="brand">
+        <span class="logo">P</span>
+        <div>
+          <h1>PromptPilot</h1>
+          <p>Improve prompts where you write them.</p>
+        </div>
+      </div>
+      <form id="settings-form">
+        <label for="api-key">OpenRouter API key</label>
+        <div class="key-row">
+          <input
+            id="api-key"
+            type="password"
+            autocomplete="off"
+            placeholder="sk-or-v1-…"
+          /><button
+            id="toggle-key"
+            class="icon"
+            type="button"
+            aria-label="Show API key"
+          >
+            Show
+          </button>
+        </div>
+        <p class="help">
+          Saved only in this browser extension. It is never added to a webpage
+          or repository.
+        </p>
+        <button class="primary" type="submit">Save key</button>
+        <button id="forget-key" class="secondary" type="button">
+          Forget key
+        </button>
+      </form>
+      <div id="status" role="status"></div>
+      <section class="steps">
+        <strong>How to use</strong>
+        <ol>
+          <li>Open ChatGPT, Claude, or Gemini.</li>
+          <li>Write your prompt normally.</li>
+          <li>Click <b>Improve</b> beside the prompt box.</li>
+        </ol>
+      </section>
+      <p class="model">Automatic model: <span id="model-name"></span></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
