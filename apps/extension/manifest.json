@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "PromptPilot",
+  "version": "0.1.0",
+  "description": "Improve prompts directly inside ChatGPT, Claude, and Gemini.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://openrouter.ai/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "PromptPilot settings",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["quality.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
