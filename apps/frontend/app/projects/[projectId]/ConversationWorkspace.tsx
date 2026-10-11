@@ -11,12 +11,9 @@ import {
 
 import {
   ApiError,
-  ContextPackage,
   Conversation,
   DocumentItem,
-  Evaluation,
   GeneratedPrompt,
-  MemoryItem,
   Message,
   ModelRun,
   PromptAnalysis,
@@ -24,58 +21,38 @@ import {
   addDocumentUrl,
   analyzeMessage,
   answerQuestion,
-  assembleContext,
-  comparisonStageCompletion,
-  compareEvaluations,
   createConversation,
   executePrompt,
   friendlyError,
   generatePrompt,
   getConversations,
   getDocuments,
-  getEvaluations,
   getGeneratedPrompts,
   getLatestAnalysis,
-  getMemory,
   getMessages,
   getNextQuestion,
   getRuns,
-  selectComparisonPair,
   sendMessage,
   skipQuestion,
   uploadDocument,
 } from "../../../lib/conversations";
+import {
+  assessPromptQuality,
+  PromptQuality,
+} from "../../../lib/prompt-quality";
 
-const stages = [
-  "Request",
-  "Analysis",
-  "Clarify",
-  "Evidence",
-  "Context",
-  "Generated prompt",
-  "Execution",
-  "Evaluation",
-] as const;
-const labels: Record<string, string> = {
-  audience: "Audience",
-  constraints: "Constraints",
-  context: "Background context",
-  output_format: "Output format",
-  task: "Objective",
-  requirements: "Requirements",
-  instruction_following: "Instruction Following",
-  contextual_grounding: "Contextual Grounding",
-};
+type ToolView = "quality" | "sources";
+
 const humanize = (value: string) =>
-  labels[value] ??
   value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-const date = (value: string) => new Date(value).toLocaleString();
 
 export function ConversationWorkspace({
   projectId,
+  projectName,
   canWrite,
 }: {
   projectId: string;
+  projectName: string;
   canWrite: boolean;
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -83,22 +60,19 @@ export function ConversationWorkspace({
   const [messages, setMessages] = useState<Message[]>([]);
   const [analysis, setAnalysis] = useState<PromptAnalysis | null>(null);
   const [questions, setQuestions] = useState<QuestionSession | null>(null);
-  const [memory, setMemory] = useState<MemoryItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
-  const [context, setContext] = useState<ContextPackage | null>(null);
   const [prompts, setPrompts] = useState<GeneratedPrompt[]>([]);
   const [runs, setRuns] = useState<ModelRun[]>([]);
-  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
-  const [stage, setStage] = useState(0);
+  const [draft, setDraft] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [url, setUrl] = useState("");
+  const [toolView, setToolView] = useState<ToolView>("quality");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const [draft, setDraft] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [mode, setMode] = useState("structured");
-  const [url, setUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const submissionKey = useRef<string | null>(null);
+  const chatEnd = useRef<HTMLDivElement | null>(null);
 
   const source = useMemo(
     () => [...messages].reverse().find((item) => item.role === "user") ?? null,
@@ -108,58 +82,38 @@ export function ConversationWorkspace({
     () => prompts.find((item) => item.source_message_id === source?.id) ?? null,
     [prompts, source],
   );
-  const activeSourceId =
-    source && source.conversation_id === selected?.id ? source.id : null;
   const relatedRuns = useMemo(
-    () =>
-      runs.filter(
-        (run) =>
-          run.source_message_id === source?.id &&
-          (!currentPrompt ||
-            run.prompt_version_id === currentPrompt.version_id ||
-            run.execution_strategy === "baseline"),
-      ),
-    [runs, currentPrompt, source],
+    () => runs.filter((run) => run.source_message_id === source?.id),
+    [runs, source],
   );
-  const comparison = selectComparisonPair(
-    runs,
-    activeSourceId,
-    currentPrompt?.version_id ?? null,
+  const liveQuality = useMemo(
+    () => assessPromptQuality(draft || source?.content || ""),
+    [draft, source],
   );
-  const comparisonProgress = comparisonStageCompletion(comparison, evaluations);
-  const relatedEvaluations = comparisonProgress.relatedEvaluations;
 
-  const loadProjectEvidence = useCallback(async () => {
-    const [savedMemory, savedDocuments] = await Promise.all([
-      getMemory(projectId),
-      getDocuments(projectId),
-    ]);
-    setMemory(savedMemory);
-    setDocuments(savedDocuments);
+  const loadDocuments = useCallback(async () => {
+    setDocuments(await getDocuments(projectId));
   }, [projectId]);
 
   const loadConversation = useCallback(
     async (conversation: Conversation) => {
       setLoading(true);
       setError("");
-      setContext(null);
       setAnalysis(null);
       setQuestions(null);
       try {
         const history = await getMessages(conversation.id);
-        setMessages(history);
         const latestSource = [...history]
           .reverse()
           .find((item) => item.role === "user");
-        const baseLoads = await Promise.all([
+        const [savedPrompts, savedRuns] = await Promise.all([
           getGeneratedPrompts(conversation.id),
           getRuns(conversation.id),
-          getEvaluations(conversation.id),
-          loadProjectEvidence(),
+          loadDocuments(),
         ]);
-        setPrompts(baseLoads[0]);
-        setRuns(baseLoads[1]);
-        setEvaluations(baseLoads[2]);
+        setMessages(history);
+        setPrompts(savedPrompts);
+        setRuns(savedRuns);
         if (latestSource) {
           try {
             const savedAnalysis = await getLatestAnalysis(
@@ -187,14 +141,14 @@ export function ConversationWorkspace({
         setError(
           friendlyError(
             loadError,
-            "We could not restore this conversation. Check your connection and retry.",
+            "PromptPilot could not restore this conversation. Retry in a moment.",
           ),
         );
       } finally {
         setLoading(false);
       }
     },
-    [loadProjectEvidence],
+    [loadDocuments],
   );
 
   useEffect(() => {
@@ -204,19 +158,24 @@ export function ConversationWorkspace({
         setSelected(items[0] ?? null);
         if (!items[0]) {
           setLoading(false);
-          loadProjectEvidence().catch(() =>
-            setError("Evidence could not be loaded."),
-          );
+          void loadDocuments().catch(() => undefined);
         }
       })
       .catch((loadError) => {
-        setError(friendlyError(loadError, "We could not load conversations."));
+        setError(
+          friendlyError(loadError, "PromptPilot could not load your chats."),
+        );
         setLoading(false);
       });
-  }, [projectId, loadProjectEvidence]);
+  }, [projectId, loadDocuments]);
+
   useEffect(() => {
     if (selected) void loadConversation(selected);
   }, [selected, loadConversation]);
+
+  useEffect(() => {
+    chatEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, analysis, questions, currentPrompt, relatedRuns, busy]);
 
   async function act(
     key: string,
@@ -236,62 +195,83 @@ export function ConversationWorkspace({
   }
 
   async function newConversation() {
-    const title = window.prompt("Conversation title", "New request");
-    if (!title?.trim()) return;
     await act(
-      "conversation",
+      "new-chat",
       async () => {
-        const item = await createConversation(projectId, title.trim());
+        const item = await createConversation(projectId, "New prompt");
         setConversations((items) => [item, ...items]);
         setSelected(item);
-        setStage(0);
+        setMessages([]);
+        setAnalysis(null);
+        setQuestions(null);
+        setPrompts([]);
+        setRuns([]);
+        setDraft("");
       },
-      "We could not create that conversation.",
+      "A new chat could not be created.",
     );
+  }
+
+  async function generateFor(conversationId: string, messageId: string) {
+    const prompt = await generatePrompt(
+      conversationId,
+      messageId,
+      "structured",
+    );
+    setPrompts((items) => [
+      prompt,
+      ...items.filter((item) => item.version_id !== prompt.version_id),
+    ]);
+  }
+
+  async function analyzeAndContinue(conversationId: string, messageId: string) {
+    const result = await analyzeMessage(conversationId, messageId);
+    setAnalysis(result);
+    const session = await getNextQuestion(conversationId);
+    setQuestions(session);
+    if (!session.next_question) await generateFor(conversationId, messageId);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected || !draft.trim()) return;
-    const content = draft.trim();
-    submissionKey.current ??= crypto.randomUUID();
+    if (!canWrite || !draft.trim()) return;
+
     await act(
-      "send",
+      "improve",
       async () => {
+        let conversation = selected;
+        let createdConversation = false;
+        if (!conversation) {
+          conversation = await createConversation(projectId, "New prompt");
+          createdConversation = true;
+          setConversations((items) => [conversation!, ...items]);
+        }
+        const content = draft.trim();
+        submissionKey.current ??= crypto.randomUUID();
         const message = await sendMessage(
-          selected.id,
+          conversation.id,
           content,
-          submissionKey.current!,
+          submissionKey.current,
         );
         submissionKey.current = null;
         setDraft("");
         setMessages((items) => [...items, message]);
         setAnalysis(null);
         setQuestions(null);
-        setContext(null);
-        setStage(1);
+        setPrompts((items) =>
+          items.filter((item) => item.source_message_id !== message.id),
+        );
+        await analyzeAndContinue(conversation.id, message.id);
+        if (createdConversation) setSelected(conversation);
       },
-      "Your request was not saved. Your text is still here; retry when ready.",
-    );
-  }
-
-  async function runAnalysis() {
-    if (!selected || !source) return;
-    await act(
-      "analysis",
-      async () => {
-        const result = await analyzeMessage(selected.id, source.id);
-        setAnalysis(result);
-        setQuestions(await getNextQuestion(selected.id));
-        setStage(1);
-      },
-      "Analysis could not be completed. Please retry.",
+      "PromptPilot could not improve this prompt. Your text remains available to retry.",
     );
   }
 
   async function submitAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected || !questions?.next_question || !answer.trim()) return;
+    if (!selected || !source || !questions?.next_question || !answer.trim())
+      return;
     await act(
       "answer",
       async () => {
@@ -300,57 +280,37 @@ export function ConversationWorkspace({
           questions.next_question!.id,
           answer.trim(),
         );
+        setAnswer("");
         setQuestions(result);
         if (result.analysis) setAnalysis(result.analysis);
-        setAnswer("");
-        await loadProjectEvidence();
+        if (!result.next_question) await generateFor(selected.id, source.id);
       },
-      "Your answer was not saved. It remains in the field so you can retry.",
+      "Your answer could not be saved. Retry when ready.",
     );
   }
 
-  async function skip() {
-    if (!selected || !questions?.next_question) return;
+  async function skipCurrentQuestion() {
+    if (!selected || !source || !questions?.next_question) return;
     await act(
       "skip",
-      async () =>
-        setQuestions(
-          await skipQuestion(selected.id, questions.next_question!.id),
-        ),
-      "The question could not be skipped.",
-    );
-  }
-
-  async function assemble() {
-    if (!selected || !source) return;
-    await act(
-      "context",
       async () => {
-        setContext(
-          await assembleContext(projectId, {
-            task: source.content,
-            conversation_id: selected.id,
-            message_id: source.id,
-            ...(analysis ? { analysis_id: analysis.id } : {}),
-          }),
+        const result = await skipQuestion(
+          selected.id,
+          questions.next_question!.id,
         );
+        setQuestions(result);
+        if (!result.next_question) await generateFor(selected.id, source.id);
       },
-      "Context could not be assembled. Please retry.",
+      "PromptPilot could not skip that question.",
     );
   }
 
-  async function generate() {
+  async function regenerate() {
     if (!selected || !source) return;
     await act(
       "generate",
-      async () => {
-        const item = await generatePrompt(selected.id, source.id, mode);
-        setPrompts((items) => [
-          item,
-          ...items.filter((saved) => saved.version_id !== item.version_id),
-        ]);
-      },
-      "Prompt generation is unavailable. Confirm the generation provider is configured, then retry.",
+      () => generateFor(selected.id, source.id),
+      "The improved prompt could not be generated.",
     );
   }
 
@@ -366,901 +326,646 @@ export function ConversationWorkspace({
             source.id,
             strategy,
           );
-          setRuns((items) => [run, ...items]);
+          setRuns((items) => [
+            run,
+            ...items.filter((item) => item.id !== run.id),
+          ]);
         } catch (executionError) {
           setRuns(await getRuns(selected.id));
           throw executionError;
         }
       },
-      "Model execution is unavailable. A target provider must be configured on the server; no response was invented.",
+      "The configured AI model is unavailable. Check the server-side OpenRouter settings.",
     );
   }
 
-  async function compare() {
-    if (!selected || !comparison.pair) return;
-    const pair = comparison.pair;
-    await act(
-      "compare",
-      async () => {
-        const result = await compareEvaluations(selected.id, pair);
-        setEvaluations((items) => [result, ...items]);
-      },
-      "Evaluation failed. The saved runs remain available to retry.",
-    );
+  async function logout() {
+    await fetch("/api/v1/auth/logout", {
+      method: "POST",
+      credentials: "include",
+    });
+    window.location.assign("/login");
   }
 
-  const evidenceCount = memory.length + documents.length;
-  const completed = [
-    Boolean(source),
-    Boolean(analysis),
-    questions?.status === "completed",
-    evidenceCount > 0,
-    Boolean(context),
-    Boolean(currentPrompt),
-    comparisonProgress.executionComplete,
-    comparisonProgress.evaluationComplete,
-  ];
-
-  if (loading && !selected)
-    return (
-      <div className="workspace-loading" role="status">
-        Loading saved workflow…
-      </div>
-    );
   return (
-    <div className="workflow-shell">
-      <aside className="conversation-sidebar">
-        <div className="row">
-          <strong>Conversations</strong>
-          {canWrite && (
-            <button
-              onClick={newConversation}
-              disabled={Boolean(busy)}
-              aria-label="Create conversation"
-            >
-              +
-            </button>
+    <div className="pilot-shell">
+      <aside className="pilot-sidebar" aria-label="PromptPilot navigation">
+        <div className="pilot-brand">
+          <span className="pilot-mark">P</span>
+          <div>
+            <strong>PromptPilot</strong>
+            <small>Better prompts, naturally</small>
+          </div>
+        </div>
+        <button
+          className="new-chat-button"
+          onClick={newConversation}
+          disabled={!canWrite || Boolean(busy)}
+        >
+          <span>＋</span> New prompt
+        </button>
+        <div className="sidebar-section">
+          <small>TOOLS</small>
+          <button
+            className={toolView === "quality" ? "tool-active" : ""}
+            onClick={() => setToolView("quality")}
+          >
+            <span>◉</span> Prompt quality
+          </button>
+          <button
+            className={toolView === "sources" ? "tool-active" : ""}
+            onClick={() => setToolView("sources")}
+          >
+            <span>＋</span> Sources
+            {documents.length > 0 && <b>{documents.length}</b>}
+          </button>
+        </div>
+        <div className="sidebar-section chat-history">
+          <small>RECENT</small>
+          {conversations.length === 0 ? (
+            <p>No saved prompts yet</p>
+          ) : (
+            conversations.map((item) => (
+              <button
+                key={item.id}
+                className={selected?.id === item.id ? "chat-active" : ""}
+                onClick={() => setSelected(item)}
+              >
+                <span>⌁</span>
+                <span>{item.title}</span>
+              </button>
+            ))
           )}
         </div>
-        {conversations.length === 0 ? (
-          <p className="muted">No conversations yet.</p>
-        ) : (
-          conversations.map((item) => (
-            <button
-              className={`conversation-item ${selected?.id === item.id ? "selected" : ""}`}
-              key={item.id}
-              onClick={() => {
-                setSelected(item);
-                setStage(0);
+        <div className="sidebar-footer">
+          <div>
+            <span className="status-dot" /> {projectName}
+          </div>
+          <button onClick={logout}>Sign out</button>
+        </div>
+      </aside>
+
+      <main className="pilot-chat">
+        <header className="chat-header">
+          <div>
+            <strong>{selected?.title ?? "New prompt"}</strong>
+            <span>Prompt improvement assistant</span>
+          </div>
+          <div
+            className="header-score"
+            aria-label={`Prompt quality ${liveQuality.score} out of 100`}
+          >
+            <QualityRing
+              score={analysis?.overall_score ?? liveQuality.score}
+              compact
+            />
+            <span>Quality</span>
+          </div>
+        </header>
+
+        <div className="chat-scroll" aria-live="polite">
+          {loading ? (
+            <div className="assistant-thinking">
+              Restoring your conversation…
+            </div>
+          ) : messages.length === 0 ? (
+            <Welcome setDraft={setDraft} />
+          ) : (
+            <div className="chat-thread">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`chat-message ${message.role === "user" ? "from-user" : "from-pilot"}`}
+                >
+                  <div className="message-avatar">
+                    {message.role === "user" ? "You" : "P"}
+                  </div>
+                  <div className="message-body">
+                    <strong>
+                      {message.role === "user" ? "You" : "PromptPilot"}
+                    </strong>
+                    <p>{message.content}</p>
+                  </div>
+                </div>
+              ))}
+
+              {source && (analysis || busy === "improve") && (
+                <AnalysisMessage
+                  analysis={analysis}
+                  busy={busy === "improve"}
+                />
+              )}
+
+              {questions?.next_question && (
+                <QuestionMessage
+                  session={questions}
+                  answer={answer}
+                  setAnswer={setAnswer}
+                  onSubmit={submitAnswer}
+                  onSkip={skipCurrentQuestion}
+                  busy={Boolean(busy)}
+                />
+              )}
+
+              {source &&
+                !questions?.next_question &&
+                busy === "improve" &&
+                analysis && (
+                  <div className="assistant-thinking">
+                    Building your improved prompt…
+                  </div>
+                )}
+
+              {currentPrompt && (
+                <PromptResult
+                  prompt={currentPrompt}
+                  copied={copied}
+                  onCopy={async () => {
+                    await navigator.clipboard.writeText(
+                      currentPrompt.optimized_prompt,
+                    );
+                    setCopied(true);
+                    window.setTimeout(() => setCopied(false), 1500);
+                  }}
+                  onRegenerate={regenerate}
+                  onExecute={execute}
+                  busy={busy}
+                />
+              )}
+
+              {relatedRuns.map((run) => (
+                <RunMessage key={run.id} run={run} />
+              ))}
+            </div>
+          )}
+          {error && (
+            <div className="chat-error" role="alert">
+              <strong>Something needs attention</strong>
+              <span>{error}</span>
+            </div>
+          )}
+          <div ref={chatEnd} />
+        </div>
+
+        <form className="bottom-composer" onSubmit={submit}>
+          <div className="composer-quality">
+            <span
+              className={`quality-dot quality-${qualityTone(liveQuality.score)}`}
+            />
+            {liveQuality.score}/100 · {liveQuality.label}
+          </div>
+          <div className="composer-box">
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
               }}
+              placeholder="Describe what you want to achieve…"
+              rows={2}
+              disabled={!canWrite || busy === "improve"}
+              aria-label="Prompt to improve"
+            />
+            <button
+              aria-label="Improve prompt"
+              title="Improve prompt"
+              disabled={!canWrite || Boolean(busy) || !draft.trim()}
             >
-              {item.title}
+              {busy === "improve" ? "…" : "↑"}
             </button>
-          ))
+          </div>
+          <small>Enter to improve · Shift + Enter for a new line</small>
+        </form>
+      </main>
+
+      <aside className="insight-panel">
+        {toolView === "quality" ? (
+          <QualityPanel quality={liveQuality} analysis={analysis} />
+        ) : (
+          <SourcesPanel
+            projectId={projectId}
+            documents={documents}
+            busy={busy}
+            url={url}
+            setUrl={setUrl}
+            act={act}
+            reload={loadDocuments}
+          />
         )}
       </aside>
-      <section className="workflow-main">
-        {error && (
-          <div className="error" role="alert">
-            {error}
-            {error.includes("session expired") && <a href="/login"> Sign in</a>}
-          </div>
-        )}
-        {!selected ? (
-          <div className="empty-state">
-            <h2>Start with a conversation</h2>
-            <p className="muted">
-              Create one to save a request and move through the PromptPilot
-              workflow.
-            </p>
-            {canWrite && (
-              <button onClick={newConversation}>New conversation</button>
-            )}
-          </div>
-        ) : (
-          <>
-            <header className="workflow-heading">
-              <div>
-                <small className="eyebrow">Active conversation</small>
-                <h2>{selected.title}</h2>
-              </div>
-              <span className="save-state">Saved to project</span>
-            </header>
-            <nav className="stage-nav" aria-label="Prompt workflow">
-              {stages.map((item, index) => (
-                <button
-                  key={item}
-                  className={stage === index ? "active" : ""}
-                  onClick={() => setStage(index)}
-                >
-                  <span>{completed[index] ? "✓" : index + 1}</span>
-                  {item}
-                </button>
-              ))}
-            </nav>
-            {loading ? (
-              <div className="workspace-loading" role="status">
-                Restoring saved workflow…
-              </div>
-            ) : (
-              <div className="stage-content">
-                {stage === 0 && (
-                  <section>
-                    <StageTitle
-                      title="Original request"
-                      description="Your latest saved request is the source for every later step."
-                    />
-                    {source ? (
-                      <div className="request-card">
-                        <small>
-                          Original request · {date(source.created_at)}
-                        </small>
-                        <p>{source.content}</p>
-                      </div>
-                    ) : (
-                      <p className="empty-note">
-                        No request has been submitted in this conversation.
-                      </p>
-                    )}
-                    {canWrite && (
-                      <form className="composer" onSubmit={submit}>
-                        <label className="grow">
-                          Request
-                          <textarea
-                            value={draft}
-                            onChange={(event) => setDraft(event.target.value)}
-                            placeholder="Describe the outcome you need, relevant constraints, audience, and format…"
-                            rows={4}
-                            disabled={busy === "send"}
-                          />
-                        </label>
-                        <button disabled={Boolean(busy) || !draft.trim()}>
-                          {busy === "send"
-                            ? "Saving…"
-                            : source
-                              ? "Add new request"
-                              : "Save request"}
-                        </button>
-                      </form>
-                    )}
-                  </section>
-                )}
-                {stage === 1 && (
-                  <section>
-                    <StageTitle
-                      title="Request analysis"
-                      description="See what is clear and which details may still be needed."
-                    />
-                    {!source ? (
-                      <p className="empty-note">Submit a request first.</p>
-                    ) : !analysis ? (
-                      <ActionEmpty
-                        text="Analysis has not been started."
-                        action="Analyze request"
-                        onClick={runAnalysis}
-                        disabled={!canWrite || Boolean(busy)}
-                      />
-                    ) : (
-                      <>
-                        <div className="score-card">
-                          <div className="score">
-                            {analysis.overall_score}
-                            <small>/100</small>
-                          </div>
-                          <div>
-                            <h3>{analysis.status}</h3>
-                            <p>
-                              {humanize(analysis.task_category)} ·{" "}
-                              {analysis.fallback_used
-                                ? "Deterministic analysis"
-                                : "Provider-assisted analysis"}
-                            </p>
-                          </div>
-                          {canWrite && (
-                            <button
-                              className="secondary"
-                              onClick={runAnalysis}
-                              disabled={Boolean(busy)}
-                            >
-                              {busy === "analysis" ? "Analyzing…" : "Run again"}
-                            </button>
-                          )}
-                        </div>
-                        <div className="analysis-grid">
-                          {analysis.dimensions
-                            .filter((item) => item.applicable)
-                            .map((item) => (
-                              <article className="detail-card" key={item.key}>
-                                <div className="row">
-                                  <strong>{humanize(item.key)}</strong>
-                                  <span className={`badge ${item.status}`}>
-                                    {item.score ?? "—"}
-                                  </span>
-                                </div>
-                                <p>{item.explanation}</p>
-                                {item.evidence && (
-                                  <small className="muted">
-                                    Evidence: {item.evidence}
-                                  </small>
-                                )}
-                              </article>
-                            ))}
-                        </div>
-                        <h3>Information gaps</h3>
-                        {analysis.gaps.length === 0 ? (
-                          <p className="success-note">
-                            No information gaps were identified.
-                          </p>
-                        ) : (
-                          analysis.gaps.map((gap) => (
-                            <article className="gap-card" key={gap.id}>
-                              <span className={`badge ${gap.severity}`}>
-                                {humanize(gap.severity)}
-                              </span>
-                              <div>
-                                <strong>{gap.title}</strong>
-                                <p>{gap.description}</p>
-                                <small>
-                                  {humanize(gap.dimension)} ·{" "}
-                                  {humanize(gap.status)}
-                                </small>
-                              </div>
-                            </article>
-                          ))
-                        )}
-                        <details>
-                          <summary>Technical details</summary>
-                          <p className="muted">
-                            Analysis {analysis.analysis_version} ·{" "}
-                            {analysis.analysis_mode} ·{" "}
-                            {analysis.ai_provider ?? "No provider"}{" "}
-                            {analysis.ai_model ?? ""}
-                          </p>
-                        </details>
-                      </>
-                    )}
-                  </section>
-                )}
-                {stage === 2 && (
-                  <section>
-                    <StageTitle
-                      title="Clarify the request"
-                      description="Answer only what is useful. Every saved answer becomes traceable project evidence."
-                    />
-                    {!analysis ? (
-                      <p className="empty-note">
-                        Run analysis before clarification.
-                      </p>
-                    ) : !questions ? (
-                      <p className="empty-note">
-                        No clarification session is available.
-                      </p>
-                    ) : questions.next_question ? (
-                      <div className="question-card">
-                        <div className="row">
-                          <small>
-                            Current question · priority{" "}
-                            {questions.next_question.priority}
-                          </small>
-                          <span className="badge">
-                            {humanize(questions.next_question.source)}
-                          </span>
-                        </div>
-                        <h3>{questions.next_question.text}</h3>
-                        <form onSubmit={submitAnswer}>
-                          <label>
-                            Your answer
-                            <textarea
-                              value={answer}
-                              onChange={(event) =>
-                                setAnswer(event.target.value)
-                              }
-                              rows={4}
-                              disabled={Boolean(busy)}
-                            />
-                          </label>
-                          <div className="button-row">
-                            <button disabled={Boolean(busy) || !answer.trim()}>
-                              {busy === "answer"
-                                ? "Saving answer…"
-                                : "Save answer"}
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary"
-                              onClick={skip}
-                              disabled={Boolean(busy)}
-                            >
-                              {busy === "skip" ? "Skipping…" : "Skip question"}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                    ) : (
-                      <div className="success-note">
-                        <strong>No questions remaining.</strong>
-                        <p>
-                          {questions.stop_reason === "no_unresolved_gaps"
-                            ? "PromptPilot has reached the end of the clarification stage."
-                            : "This clarification session is complete."}
-                        </p>
-                      </div>
-                    )}
-                  </section>
-                )}
-                {stage === 3 && (
-                  <section>
-                    <StageTitle
-                      title="Project evidence"
-                      description="Review the saved facts, clarification answers, documents, and their provenance."
-                      actions={
-                        <button
-                          className="secondary"
-                          onClick={() =>
-                            loadProjectEvidence().catch(() =>
-                              setError("Evidence could not be refreshed."),
-                            )
-                          }
-                        >
-                          Refresh
-                        </button>
-                      }
-                    />
-                    <div className="evidence-grid">
-                      <div>
-                        <h3>Memory and answers</h3>
-                        {memory.length === 0 ? (
-                          <p className="empty-note">
-                            No saved project facts or answers.
-                          </p>
-                        ) : (
-                          memory.map((item) => (
-                            <article className="evidence-item" key={item.id}>
-                              <div className="row">
-                                <strong>{item.subject}</strong>
-                                <span className="badge">
-                                  {humanize(item.category)}
-                                </span>
-                              </div>
-                              <p>{item.content}</p>
-                              <small>
-                                Source: {humanize(item.source)} · Confidence{" "}
-                                {item.confidence}%
-                              </small>
-                            </article>
-                          ))
-                        )}
-                      </div>
-                      <div>
-                        <h3>Documents and sources</h3>
-                        {documents.length === 0 ? (
-                          <p className="empty-note">
-                            No documents or URLs have been added.
-                          </p>
-                        ) : (
-                          documents.map((item) => (
-                            <article className="evidence-item" key={item.id}>
-                              <div className="row">
-                                <strong>{item.name}</strong>
-                                <span className={`badge ${item.status}`}>
-                                  {humanize(item.status)}
-                                </span>
-                              </div>
-                              <small>
-                                {humanize(item.source_type)} ·{" "}
-                                {Math.ceil(item.size_bytes / 1024)} KB
-                              </small>
-                              {item.source_url && (
-                                <p className="truncate">{item.source_url}</p>
-                              )}
-                              {item.error_message && (
-                                <p className="error-inline">
-                                  Processing failed: {item.error_message}
-                                </p>
-                              )}
-                            </article>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                    {canWrite && (
-                      <EvidenceForms
-                        busy={busy}
-                        url={url}
-                        setUrl={setUrl}
-                        onUrl={() =>
-                          act(
-                            "url",
-                            async () => {
-                              await addDocumentUrl(projectId, url.trim());
-                              setUrl("");
-                              await loadProjectEvidence();
-                            },
-                            "The URL could not be processed.",
-                          )
-                        }
-                        onFile={(file) =>
-                          act(
-                            "file",
-                            async () => {
-                              await uploadDocument(projectId, file);
-                              await loadProjectEvidence();
-                            },
-                            "The document could not be uploaded.",
-                          )
-                        }
-                      />
-                    )}
-                  </section>
-                )}
-                {stage === 4 && (
-                  <section>
-                    <StageTitle
-                      title="Assembled context"
-                      description="The original request stays separate from supporting evidence selected for generation."
-                      actions={
-                        <button
-                          onClick={assemble}
-                          disabled={!source || Boolean(busy)}
-                        >
-                          {busy === "context"
-                            ? "Assembling…"
-                            : context
-                              ? "Reassemble"
-                              : "Assemble context"}
-                        </button>
-                      }
-                    />
-                    {!context ? (
-                      <p className="empty-note">
-                        No context has been assembled for this request.
-                      </p>
-                    ) : (
-                      <>
-                        <div className="budget">
-                          <span
-                            style={{
-                              width: `${Math.min(100, (context.used_budget / context.budget) * 100)}%`,
-                            }}
-                          />
-                          <small>
-                            {context.used_budget.toLocaleString()} of{" "}
-                            {context.budget.toLocaleString()} characters used
-                          </small>
-                        </div>
-                        <div className="context-columns">
-                          <ContextList
-                            title="Project memory"
-                            items={context.project_memory}
-                          />
-                          <ContextList
-                            title="Clarification answers"
-                            items={context.user_answers}
-                          />
-                          <ContextList
-                            title="Requirements"
-                            items={context.requirements}
-                          />
-                          <ContextList
-                            title="Constraints"
-                            items={context.constraints}
-                          />
-                        </div>
-                        <h3>Retrieved documents</h3>
-                        {context.document_context.length === 0 ? (
-                          <p className="empty-note">
-                            No relevant document context was selected.
-                          </p>
-                        ) : (
-                          context.document_context.map((item, index) => (
-                            <article
-                              className="evidence-item"
-                              key={`${item.provenance}-${index}`}
-                            >
-                              <strong>
-                                {item.metadata.document_name ??
-                                  "Document source"}
-                              </strong>
-                              <p>{item.content}</p>
-                              <small>
-                                {item.provenance} · Relevance{" "}
-                                {item.score.toFixed(2)}
-                              </small>
-                            </article>
-                          ))
-                        )}
-                        {context.omitted_items.length > 0 && (
-                          <details>
-                            <summary>
-                              {context.omitted_items.length} omitted item(s)
-                            </summary>
-                            {context.omitted_items.map((item) => (
-                              <p key={item.identifier}>
-                                {humanize(item.source_type)}: {item.reason}
-                              </p>
-                            ))}
-                          </details>
-                        )}
-                      </>
-                    )}
-                  </section>
-                )}
-                {stage === 5 && (
-                  <section>
-                    <StageTitle
-                      title="Generated PromptPilot prompt"
-                      description="Generate a saved, versioned prompt from the request and available context."
-                      actions={
-                        <div className="button-row">
-                          <label>
-                            Mode
-                            <select
-                              value={mode}
-                              onChange={(event) => setMode(event.target.value)}
-                            >
-                              <option value="minimal">Minimal</option>
-                              <option value="structured">Structured</option>
-                              <option value="detailed">Detailed</option>
-                            </select>
-                          </label>
-                          <button
-                            onClick={generate}
-                            disabled={!source || !canWrite || Boolean(busy)}
-                          >
-                            {busy === "generate"
-                              ? "Generating…"
-                              : "Generate prompt"}
-                          </button>
-                        </div>
-                      }
-                    />
-                    {!currentPrompt ? (
-                      <p className="empty-note">
-                        No generated prompt exists for the active request.
-                      </p>
-                    ) : (
-                      <>
-                        <div className="prompt-compare">
-                          <article>
-                            <small>Original request</small>
-                            <p>{currentPrompt.original_prompt}</p>
-                          </article>
-                          <article className="generated">
-                            <div className="row">
-                              <small>
-                                PromptPilot prompt · v
-                                {currentPrompt.version_number}
-                              </small>
-                              <button
-                                className="text-button"
-                                onClick={async () => {
-                                  await navigator.clipboard.writeText(
-                                    currentPrompt.optimized_prompt,
-                                  );
-                                  setCopied(true);
-                                  window.setTimeout(
-                                    () => setCopied(false),
-                                    1500,
-                                  );
-                                }}
-                              >
-                                {copied ? "Copied" : "Copy"}
-                              </button>
-                            </div>
-                            <p>{currentPrompt.optimized_prompt}</p>
-                          </article>
-                        </div>
-                        <div className="metadata-row">
-                          <span>
-                            {String(
-                              currentPrompt.generation_metadata
-                                .generation_mode ?? mode,
-                            )}
-                          </span>
-                          <span>
-                            {String(
-                              currentPrompt.generation_metadata.provider ??
-                                "Unknown provider",
-                            )}{" "}
-                            /{" "}
-                            {String(
-                              currentPrompt.generation_metadata.model ??
-                                "Unknown model",
-                            )}
-                          </span>
-                          <span>{date(currentPrompt.created_at)}</span>
-                        </div>
-                        {currentPrompt.warnings.map((warning) => (
-                          <p className="warning-note" key={warning}>
-                            Warning: {warning}
-                          </p>
-                        ))}
-                      </>
-                    )}
-                  </section>
-                )}
-                {stage === 6 && (
-                  <section>
-                    <StageTitle
-                      title="Target execution"
-                      description="Run only through a configured server-side target provider. PromptPilot never asks for credentials here."
-                    />
-                    {!currentPrompt ? (
-                      <p className="empty-note">
-                        Generate a prompt before model execution.
-                      </p>
-                    ) : (
-                      <div className="run-grid">
-                        {(["baseline", "promptpilot"] as const).map(
-                          (strategy) => {
-                            const run = relatedRuns.find(
-                              (item) => item.execution_strategy === strategy,
-                            );
-                            return (
-                              <article className="run-card" key={strategy}>
-                                <div className="row">
-                                  <h3>
-                                    {strategy === "baseline"
-                                      ? "Baseline response"
-                                      : "PromptPilot response"}
-                                  </h3>
-                                  {run && (
-                                    <span className={`badge ${run.status}`}>
-                                      {humanize(run.status)}
-                                    </span>
-                                  )}
-                                </div>
-                                {run?.response_text ? (
-                                  <p>{run.response_text}</p>
-                                ) : run?.error_message ? (
-                                  <p className="error-inline">
-                                    {run.error_message}
-                                  </p>
-                                ) : (
-                                  <p className="muted">
-                                    No saved response. If no provider is
-                                    configured, execution will remain
-                                    unavailable.
-                                  </p>
-                                )}
-                                {run && (
-                                  <small>
-                                    {run.provider} / {run.model}
-                                    {run.latency_ms
-                                      ? ` · ${run.latency_ms} ms`
-                                      : ""}
-                                  </small>
-                                )}
-                                {canWrite && (
-                                  <button
-                                    onClick={() => execute(strategy)}
-                                    disabled={Boolean(busy)}
-                                  >
-                                    {busy === `execute-${strategy}`
-                                      ? "Running…"
-                                      : run?.status === "failed"
-                                        ? "Retry"
-                                        : "Run"}
-                                  </button>
-                                )}
-                              </article>
-                            );
-                          },
-                        )}
-                      </div>
-                    )}
-                  </section>
-                )}
-                {stage === 7 && (
-                  <section>
-                    <StageTitle
-                      title="Evaluation and comparison"
-                      description="Request, provider, and model checks are preliminary; the server performs the final compatibility check, including generation parameters."
-                      actions={
-                        <button
-                          onClick={compare}
-                          disabled={!comparison.eligible || Boolean(busy)}
-                        >
-                          {busy === "compare"
-                            ? "Evaluating…"
-                            : "Compare saved responses"}
-                        </button>
-                      }
-                    />
-                    {!comparison.eligible ? (
-                      <p className="empty-note">
-                        {comparison.reason} Run the missing or mismatched
-                        strategy in Execution.
-                      </p>
-                    ) : relatedEvaluations.length === 0 ? (
-                      <p className="empty-note">
-                        Compatible runs are available, but they have not been
-                        evaluated.
-                      </p>
-                    ) : (
-                      <EvaluationView evaluation={relatedEvaluations[0]} />
-                    )}
-                  </section>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </section>
     </div>
   );
 }
 
-function StageTitle({
-  title,
-  description,
-  actions,
-}: {
-  title: string;
-  description: string;
-  actions?: React.ReactNode;
-}) {
+function Welcome({ setDraft }: { setDraft: (value: string) => void }) {
+  const starters = [
+    "Write a professional proposal",
+    "Plan a software feature",
+    "Analyse business data",
+  ];
   return (
-    <div className="stage-title">
-      <div>
-        <h2>{title}</h2>
-        <p className="muted">{description}</p>
+    <section className="pilot-welcome">
+      <div className="welcome-mark">P</div>
+      <h1>What are you trying to achieve?</h1>
+      <p>
+        Write your rough prompt below. PromptPilot will score it, find what is
+        missing, ask only useful questions, and return a stronger version.
+      </p>
+      <div className="starter-grid">
+        {starters.map((starter) => (
+          <button type="button" key={starter} onClick={() => setDraft(starter)}>
+            {starter}
+          </button>
+        ))}
       </div>
-      {actions}
+    </section>
+  );
+}
+
+function AnalysisMessage({
+  analysis,
+  busy,
+}: {
+  analysis: PromptAnalysis | null;
+  busy: boolean;
+}) {
+  if (!analysis)
+    return (
+      <div className="assistant-thinking">
+        Analysing clarity, context, constraints, and format…
+      </div>
+    );
+
+  return (
+    <div className="chat-message from-pilot">
+      <div className="message-avatar">P</div>
+      <div className="message-body assistant-card">
+        <strong>PromptPilot</strong>
+        <div className="analysis-summary">
+          <QualityRing score={analysis.overall_score} />
+          <div>
+            <h3>
+              {analysis.overall_score >= 75
+                ? "This is a solid start"
+                : "I can make this much stronger"}
+            </h3>
+            <p>
+              {analysis.gaps.length === 0
+                ? "Your goal and instructions are clear. I’m preparing the improved version."
+                : `I found ${analysis.gaps.length} area${analysis.gaps.length === 1 ? "" : "s"} that could reduce answer quality.`}
+            </p>
+          </div>
+        </div>
+        {analysis.gaps.length > 0 && (
+          <div className="recommendation-list">
+            {analysis.gaps.slice(0, 4).map((gap) => (
+              <div key={gap.id}>
+                <span className={`severity-dot severity-${gap.severity}`} />
+                <div>
+                  <strong>{gap.title}</strong>
+                  <p>{gap.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {busy && <small>Checking whether one clarification is needed…</small>}
+      </div>
     </div>
   );
 }
-function ActionEmpty({
-  text,
-  action,
-  onClick,
-  disabled,
+
+function QuestionMessage({
+  session,
+  answer,
+  setAnswer,
+  onSubmit,
+  onSkip,
+  busy,
 }: {
-  text: string;
-  action: string;
-  onClick: () => void;
-  disabled: boolean;
+  session: QuestionSession;
+  answer: string;
+  setAnswer: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onSkip: () => void;
+  busy: boolean;
 }) {
+  const question = session.next_question!;
   return (
-    <div className="empty-note">
-      <p>{text}</p>
-      <button onClick={onClick} disabled={disabled}>
-        {action}
-      </button>
+    <div className="chat-message from-pilot">
+      <div className="message-avatar">P</div>
+      <div className="message-body question-message">
+        <strong>One useful question</strong>
+        <h3>{question.text}</h3>
+        {question.options && (
+          <div className="answer-options">
+            {question.options.map((option) => (
+              <button
+                type="button"
+                key={option}
+                onClick={() => setAnswer(option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        )}
+        <form onSubmit={onSubmit}>
+          <input
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            placeholder="Type your answer"
+            disabled={busy}
+          />
+          <button disabled={busy || !answer.trim()}>Continue</button>
+          <button
+            type="button"
+            className="subtle-button"
+            onClick={onSkip}
+            disabled={busy}
+          >
+            Skip
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
-function ContextList({
-  title,
-  items,
+
+function PromptResult({
+  prompt,
+  copied,
+  onCopy,
+  onRegenerate,
+  onExecute,
+  busy,
 }: {
-  title: string;
-  items: Array<{ content: string; provenance: string }>;
+  prompt: GeneratedPrompt;
+  copied: boolean;
+  onCopy: () => void;
+  onRegenerate: () => void;
+  onExecute: (strategy: "baseline" | "promptpilot") => void;
+  busy: string;
 }) {
   return (
-    <div>
-      <h3>{title}</h3>
-      {items.length === 0 ? (
-        <p className="muted">None selected.</p>
-      ) : (
-        items.map((item, index) => (
-          <article className="context-item" key={`${title}-${index}`}>
-            <p>{item.content}</p>
-            <small>{item.provenance}</small>
-          </article>
-        ))
+    <div className="chat-message from-pilot">
+      <div className="message-avatar">P</div>
+      <div className="message-body prompt-result">
+        <div className="result-heading">
+          <div>
+            <span className="success-pill">Improved</span>
+            <h3>Your prompt is ready</h3>
+          </div>
+          <small>Version {prompt.version_number}</small>
+        </div>
+        <div className="optimized-prompt">{prompt.optimized_prompt}</div>
+        {prompt.quality_notes.length > 0 && (
+          <div className="improvement-notes">
+            {prompt.quality_notes.slice(0, 3).map((note) => (
+              <span key={note}>✓ {note}</span>
+            ))}
+          </div>
+        )}
+        <div className="result-actions">
+          <button onClick={onCopy}>{copied ? "Copied" : "Copy prompt"}</button>
+          <button
+            className="secondary-action"
+            onClick={onRegenerate}
+            disabled={Boolean(busy)}
+          >
+            {busy === "generate" ? "Improving…" : "Improve again"}
+          </button>
+          <button
+            className="secondary-action"
+            onClick={() => onExecute("baseline")}
+            disabled={Boolean(busy)}
+          >
+            Test original
+          </button>
+          <button
+            className="secondary-action"
+            onClick={() => onExecute("promptpilot")}
+            disabled={Boolean(busy)}
+          >
+            Test improved
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RunMessage({ run }: { run: ModelRun }) {
+  return (
+    <div className="chat-message from-pilot">
+      <div className="message-avatar">AI</div>
+      <div className="message-body run-message">
+        <div className="result-heading">
+          <strong>
+            {run.execution_strategy === "baseline"
+              ? "Original prompt response"
+              : "Improved prompt response"}
+          </strong>
+          <span className={`run-status run-${run.status}`}>
+            {humanize(run.status)}
+          </span>
+        </div>
+        <p>
+          {run.response_text ??
+            run.error_message ??
+            "No response was returned."}
+        </p>
+        <small>
+          {run.provider} · {run.model}
+          {run.latency_ms ? ` · ${run.latency_ms} ms` : ""}
+        </small>
+      </div>
+    </div>
+  );
+}
+
+function QualityPanel({
+  quality,
+  analysis,
+}: {
+  quality: PromptQuality;
+  analysis: PromptAnalysis | null;
+}) {
+  const score = analysis?.overall_score ?? quality.score;
+  return (
+    <div className="tool-panel-content">
+      <div className="tool-panel-heading">
+        <span>Prompt quality</span>
+        <small>Live</small>
+      </div>
+      <div className="large-quality">
+        <QualityRing score={score} />
+        <div>
+          <strong>{score}/100</strong>
+          <span>{qualityLabel(score)}</span>
+        </div>
+      </div>
+      <p className="panel-intro">
+        A strong prompt clearly communicates the goal, context, limits,
+        audience, and expected output.
+      </p>
+      <div className="criteria-list">
+        {quality.criteria.map((criterion) => (
+          <div key={criterion.key}>
+            <span
+              className={
+                criterion.present ? "criterion-good" : "criterion-missing"
+              }
+            >
+              {criterion.present ? "✓" : "·"}
+            </span>
+            <div>
+              <strong>{criterion.label}</strong>
+              <small>
+                {criterion.present ? "Detected" : criterion.suggestion}
+              </small>
+            </div>
+            <b>
+              {criterion.score}/{criterion.maximum}
+            </b>
+          </div>
+        ))}
+      </div>
+      {analysis && analysis.gaps.length > 0 && (
+        <div className="next-improvement">
+          <strong>Best next improvement</strong>
+          <p>{analysis.gaps[0].description}</p>
+        </div>
       )}
     </div>
   );
 }
-function EvidenceForms({
+
+function SourcesPanel({
+  projectId,
+  documents,
   busy,
   url,
   setUrl,
-  onUrl,
-  onFile,
+  act,
+  reload,
 }: {
+  projectId: string;
+  documents: DocumentItem[];
   busy: string;
   url: string;
   setUrl: (value: string) => void;
-  onUrl: () => void;
-  onFile: (file: File) => void;
+  act: (
+    key: string,
+    action: () => Promise<void>,
+    fallback: string,
+  ) => Promise<void>;
+  reload: () => Promise<void>;
 }) {
   return (
-    <div className="evidence-actions">
-      <label>
-        Add a public URL
-        <div className="button-row">
-          <input
-            type="url"
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://…"
-          />
-          <button
-            type="button"
-            onClick={onUrl}
-            disabled={Boolean(busy) || !url.trim()}
-          >
-            {busy === "url" ? "Adding…" : "Add URL"}
-          </button>
-        </div>
-      </label>
-      <label>
-        Upload a document
+    <div className="tool-panel-content">
+      <div className="tool-panel-heading">
+        <span>Sources</span>
+        <small>{documents.length}</small>
+      </div>
+      <p className="panel-intro">
+        Add optional material PromptPilot should consider. You do not need to
+        select a service or model.
+      </p>
+      <label className="source-upload">
+        <span>＋</span>
+        <strong>Upload a file</strong>
+        <small>PDF, DOCX, TXT, CSV or XLSX</small>
         <input
           type="file"
           accept=".txt,.md,.pdf,.docx,.csv,.xlsx"
           disabled={Boolean(busy)}
           onChange={(event) => {
             const file = event.target.files?.[0];
-            if (file) onFile(file);
+            if (!file) return;
+            void act(
+              "file",
+              async () => {
+                await uploadDocument(projectId, file);
+                await reload();
+              },
+              "That file could not be processed.",
+            );
           }}
         />
       </label>
-    </div>
-  );
-}
-function EvaluationView({ evaluation }: { evaluation: Evaluation }) {
-  const dimensions = [
-    "relevance",
-    "completeness",
-    "instruction_following",
-    "contextual_grounding",
-    "clarity",
-  ];
-  return (
-    <div className="evaluation">
-      <div className="score-row">
-        <div>
-          <small>Baseline</small>
-          <strong>{evaluation.baseline_score?.toFixed(1) ?? "—"}</strong>
-        </div>
-        <div>
-          <small>PromptPilot</small>
-          <strong>{evaluation.promptpilot_score?.toFixed(1) ?? "—"}</strong>
-        </div>
-        <div>
-          <small>Difference</small>
-          <strong>
-            {evaluation.overall_delta === null
-              ? "—"
-              : `${evaluation.overall_delta > 0 ? "+" : ""}${evaluation.overall_delta.toFixed(1)}`}
-          </strong>
-        </div>
+      <div className="url-source">
+        <input
+          type="url"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="Paste a public URL"
+        />
+        <button
+          disabled={Boolean(busy) || !url.trim()}
+          onClick={() =>
+            void act(
+              "url",
+              async () => {
+                await addDocumentUrl(projectId, url.trim());
+                setUrl("");
+                await reload();
+              },
+              "That URL could not be processed.",
+            )
+          }
+        >
+          Add
+        </button>
       </div>
-      <p>
-        {evaluation.comparison_summary || "No comparison summary was provided."}
-      </p>
-      <small>
-        Method: {humanize(evaluation.method)} · Rubric{" "}
-        {evaluation.rubric_version} · {evaluation.evaluator_provider}/
-        {evaluation.evaluator_model}
-      </small>
-      <div className="dimension-table">
-        {dimensions.map((dimension) => {
-          const base = evaluation.items.find(
-            (item) =>
-              item.response_label === "baseline" &&
-              item.dimension === dimension,
-          );
-          const prompt = evaluation.items.find(
-            (item) =>
-              item.response_label === "promptpilot" &&
-              item.dimension === dimension,
-          );
-          return (
-            <div className="dimension-row" key={dimension}>
-              <strong>{humanize(dimension)}</strong>
-              <span>{base?.score ?? "—"}</span>
-              <span>{prompt?.score ?? "—"}</span>
-              <small>
-                {prompt?.explanation ?? base?.explanation ?? "No detail"}
-              </small>
+      <div className="source-list">
+        {documents.length === 0 ? (
+          <p>No sources added. PromptPilot can still improve your prompt.</p>
+        ) : (
+          documents.map((document) => (
+            <div key={document.id}>
+              <span>▤</span>
+              <div>
+                <strong>{document.name}</strong>
+                <small>{humanize(document.status)}</small>
+              </div>
             </div>
-          );
-        })}
+          ))
+        )}
       </div>
     </div>
   );
 }
+
+function QualityRing({
+  score,
+  compact = false,
+}: {
+  score: number;
+  compact?: boolean;
+}) {
+  const safeScore = Math.max(0, Math.min(100, Math.round(score)));
+  return (
+    <div
+      className={`quality-ring ${compact ? "quality-ring-compact" : ""}`}
+      style={{ "--quality": `${safeScore * 3.6}deg` } as React.CSSProperties}
+      aria-hidden="true"
+    >
+      <span>{safeScore}</span>
+    </div>
+  );
+}
+
+const qualityLabel = (score: number) =>
+  score >= 85
+    ? "Excellent"
+    : score >= 65
+      ? "Strong"
+      : score >= 40
+        ? "Getting there"
+        : "Needs work";
+const qualityTone = (score: number) =>
+  score >= 75 ? "good" : score >= 40 ? "medium" : "low";
