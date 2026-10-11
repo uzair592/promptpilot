@@ -68,12 +68,17 @@ jobs:
           tests/acceptance/extension.e2e.ts
           apps/frontend/next.config.ts apps/frontend/lib/auth.ts
           apps/frontend/lib/conversations.ts apps/frontend/lib/projects.ts
+          apps/frontend/lib/model-recommendations.ts
+          apps/frontend/app/globals.css
           apps/frontend/app/dashboard/page.tsx apps/frontend/app/login/page.tsx
           apps/frontend/app/register/page.tsx
           "apps/frontend/app/projects/[projectId]/page.tsx"
+          "apps/frontend/app/projects/[projectId]/ConversationWorkspace.tsx"
           tests/frontend-auth.test.ts tests/frontend-conversations.test.ts
           tests/frontend-projects.test.ts tests/extension-quality.test.ts
           tests/extension-protocol.test.ts
+          tests/frontend-model-recommendations.test.ts
+          tests/acceptance/persistent-workflow.e2e.ts
 
       - name: Check patch whitespace
         run: git diff --check HEAD^ HEAD
