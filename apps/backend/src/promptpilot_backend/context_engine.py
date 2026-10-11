@@ -98,12 +98,15 @@ class ContextAssembler:
         query = select(Answer, Question, QuestionSession).join(Question, Question.id == Answer.question_id).join(QuestionSession, QuestionSession.id == Question.session_id).where(QuestionSession.project_id == data.project_id, Answer.source == "user")
         if data.conversation_id:
             query = query.where(QuestionSession.conversation_id == data.conversation_id)
+        if data.message_id:
+            query = query.join(PromptAnalysis, PromptAnalysis.id == QuestionSession.analysis_id).where(PromptAnalysis.message_id == data.message_id)
         rows = db.execute(query).all()
         result = []
         for answer, question, session in rows:
-            relevance = self._relevance(data.task, f"{question.text} {answer.content}")
-            if relevance:
-                result.append(ContextCandidate(answer.content, "answer", relevance, SOURCE_AUTHORITY["answer"], str(answer.id), f"question {question.id} / session {session.id}", {"question_id": str(question.id), "session_id": str(session.id), "source": "user"}))
+            # Direct answers for this exact source message are relevant even when
+            # short values such as "professional" have no keyword overlap.
+            relevance = max(1.0, self._relevance(data.task, f"{question.text} {answer.content}"))
+            result.append(ContextCandidate(answer.content, "answer", relevance, SOURCE_AUTHORITY["answer"], str(answer.id), f"question {question.id} / session {session.id}", {"question_id": str(question.id), "question": question.text, "session_id": str(session.id), "source": "user"}))
         return result
 
     def assemble(self, db: Session, input_data: ContextAssemblyInput | UUID, task: str | None = None, top_k: int = 5, budget: int = 8000) -> "ContextPackage":
