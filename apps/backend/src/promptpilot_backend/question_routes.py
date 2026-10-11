@@ -8,7 +8,7 @@ from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
 from .memory_service import ProjectMemoryService
-from .models import Question, QuestionSession, User
+from .models import Answer, Question, QuestionSession, User
 from .project_policy import ProjectRole
 from .question_service import (
     answer_question,
@@ -18,6 +18,7 @@ from .question_service import (
 )
 from .schemas import (
     AnswerCreateRequest,
+    ClarificationAnswerResponse,
     ProjectMemoryResponse,
     PromptAnalysisResponse,
     QuestionResponse,
@@ -25,6 +26,27 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api/v1/conversations/{conversation_id}", tags=["questions"])
+
+
+def answered_questions(
+    db: Session, session: QuestionSession
+) -> list[ClarificationAnswerResponse]:
+    rows = db.execute(
+        select(Answer, Question)
+        .join(Question, Question.id == Answer.question_id)
+        .where(Question.session_id == session.id, Answer.source == "user")
+        .order_by(Answer.created_at)
+    ).all()
+    return [
+        ClarificationAnswerResponse(
+            id=answer.id,
+            question_id=question.id,
+            question=question.text,
+            content=answer.content,
+            created_at=answer.created_at,
+        )
+        for answer, question in rows
+    ]
 
 
 def authorized_session(db: Session, conversation_id: UUID, user: User) -> QuestionSession:
@@ -50,6 +72,7 @@ def get_next(
         status=session.status,
         stop_reason=session.stop_reason,
         next_question=QuestionResponse.model_validate(question) if question else None,
+        answered_questions=answered_questions(db, session),
     )
 
 
@@ -83,6 +106,7 @@ def submit_answer(
         stop_reason=session.stop_reason,
         next_question=QuestionResponse.model_validate(question) if question else None,
         analysis=PromptAnalysisResponse.model_validate(analysis),
+        answered_questions=answered_questions(db, session),
         memory_updates=[
             ProjectMemoryResponse.model_validate(item)
             for item in ProjectMemoryService().active(db, session.project_id)
@@ -111,4 +135,5 @@ def skip_question(
         status=session.status,
         stop_reason=session.stop_reason,
         next_question=QuestionResponse.model_validate(next_item) if next_item else None,
+        answered_questions=answered_questions(db, session),
     )
