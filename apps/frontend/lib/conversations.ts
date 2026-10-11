@@ -60,6 +60,13 @@ export type QuestionSession = {
     options: string[] | null;
   } | null;
   analysis?: PromptAnalysis | null;
+  answered_questions: Array<{
+    id: string;
+    question_id: string;
+    question: string;
+    content: string;
+    created_at: string;
+  }>;
 };
 export type MemoryItem = {
   id: string;
