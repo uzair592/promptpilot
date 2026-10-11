@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "PromptPilot",
-  description: "Context engineering workspace",
+  description: "Turn rough ideas into clear, high-quality prompts",
 };
 
 export default function RootLayout({
