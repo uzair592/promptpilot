@@ -94,9 +94,40 @@ test("registers, completes, and restores the persistent product workflow", async
   await expect(page.getByText(/I found \d+ area/)).toBeVisible();
 
   const skipQuestion = page.getByRole("button", { name: "Skip", exact: true });
+  const clarificationBox = page.getByRole("textbox", {
+    name: "Clarification answer",
+  });
   const promptReady = page.getByRole("heading", {
     name: "Your prompt is ready",
   });
+  await expect
+    .poll(
+      async () =>
+        (await promptReady.isVisible().catch(() => false)) ||
+        (await clarificationBox.isVisible().catch(() => false)),
+    )
+    .toBe(true);
+  if (await clarificationBox.isVisible().catch(() => false)) {
+    await clarificationBox.fill(
+      "A complete plan for beginner community organizers using simple language",
+    );
+    const answered = page.waitForResponse(
+      (response) =>
+        response.url().includes("/answers") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Send answer" }).click();
+    expect((await answered).status()).toBe(201);
+    await expect(
+      page.getByText(
+        "A complete plan for beginner community organizers using simple language",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Saved for prompt generation", { exact: false }),
+    ).toBeVisible();
+  }
   for (let count = 0; count < 20; count += 1) {
     await expect
       .poll(
@@ -117,6 +148,8 @@ test("registers, completes, and restores the persistent product workflow", async
   }
   await expect(promptReady).toBeVisible();
   await expect(page.getByRole("button", { name: "Copy prompt" })).toBeVisible();
+  await expect(page.getByText("Best AI for this prompt")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Copy & open/ })).toBeVisible();
 
   await page.getByRole("button", { name: "Test original" }).click();
   await expect(page.getByText(/Local deterministic response/)).toBeVisible();
