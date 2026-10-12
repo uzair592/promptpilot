@@ -116,6 +116,14 @@ def test_plan_creates_ordered_milestones_tasks_and_provider_routing(client):
     assert all(task["scheduled_for"] for task in tasks)
     assert tasks[0]["dependencies"] == []
     assert tasks[1]["dependencies"] == [tasks[0]["id"]]
+    by_title = {task["title"]: task for task in tasks}
+    assert by_title["Implement the primary interface"]["dependencies"] == [
+        by_title["Design API contracts"]["id"]
+    ]
+    assert set(by_title["Run independent quality review"]["dependencies"]) == {
+        by_title["Implement backend foundation"]["id"],
+        by_title["Implement the primary interface"]["id"],
+    }
 
 
 def test_unrelated_user_cannot_read_or_create_project_plan(client):
@@ -228,6 +236,63 @@ def test_task_waits_for_its_predecessor(client):
     response = client.post(f"/api/v1/agent-tasks/{next_task_id}/run")
     assert response.status_code == 409
     assert "prerequisite" in response.text.lower()
+
+
+def test_tester_receives_both_parallel_implementation_handoffs(client, monkeypatch):
+    register(client)
+    project_id = create_project(client)
+    add_openrouter(client)
+    with SessionLocal() as db:
+        connection = db.scalar(select(ProviderConnection))
+        assert connection is not None
+        connection.status = "active"
+        db.commit()
+    plan = client.post(
+        f"/api/v1/projects/{project_id}/plans",
+        json={"title": "POS", "idea": "Build a complete shop checkout application."},
+    ).json()
+    tasks = [task for milestone in plan["milestones"] for task in milestone["tasks"]]
+    tester_id = next(task["id"] for task in tasks if task["role"] == "tester")
+    with SessionLocal() as db:
+        for item in tasks:
+            if item["id"] == tester_id:
+                break
+            task = db.get(AgentTask, UUID(item["id"]))
+            assert task is not None
+            task.status = "review"
+            task.output_text = f"Output from {task.role}: {task.title}"
+        db.commit()
+
+    received: list[str] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict:
+            return {"choices": [{"message": {"content": "Test plan"}}]}
+
+    class FakeClient:
+        def __init__(self, *, timeout: float) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            pass
+
+        def post(self, url: str, **kwargs: object) -> FakeResponse:
+            body = kwargs["json"]
+            assert isinstance(body, dict)
+            received.append(body["messages"][0]["content"])
+            return FakeResponse()
+
+    monkeypatch.setattr("promptpilot_backend.orchestration_service.httpx.Client", FakeClient)
+    response = client.post(f"/api/v1/agent-tasks/{tester_id}/run")
+    assert response.status_code == 200
+    assert "Output from backend: Implement backend foundation" in received[0]
+    assert "Output from frontend: Implement the primary interface" in received[0]
 
 
 def test_reviewed_code_creates_draft_pull_request_without_returning_token(client, monkeypatch):

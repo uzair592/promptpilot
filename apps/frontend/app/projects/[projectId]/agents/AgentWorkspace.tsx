@@ -186,6 +186,46 @@ export function AgentWorkspace({
     });
   }
 
+  function readyTasks(): AgentTask[] {
+    const tasks = activePlan?.milestones.flatMap((item) => item.tasks) || [];
+    const byId = new Map(tasks.map((task) => [task.id, task]));
+    return tasks.filter(
+      (task) =>
+        task.assigned_connection_id &&
+        ["backlog", "scheduled", "ready", "failed"].includes(task.status) &&
+        task.dependencies.every((id) =>
+          ["review", "completed"].includes(byId.get(id)?.status || ""),
+        ),
+    );
+  }
+
+  function runReadyTasks() {
+    const candidates = readyTasks();
+    if (candidates.length === 0) {
+      setNotice(
+        "No tasks are ready yet. Connect models or finish prerequisite tasks.",
+      );
+      return;
+    }
+    void act("run-ready", async () => {
+      const results = await Promise.allSettled(
+        candidates.map((task) => runAgentTask(task.id)),
+      );
+      const succeeded = results.filter(
+        (result) => result.status === "fulfilled",
+      ).length;
+      await refresh();
+      setNotice(
+        `${succeeded} of ${candidates.length} ready tasks completed. Review their outputs before publishing.`,
+      );
+      if (succeeded < candidates.length) {
+        setError(
+          "Some model runs failed. Check each task and retry after fixing its provider or model.",
+        );
+      }
+    });
+  }
+
   return (
     <main className="agent-page">
       <header className="agent-topbar">
@@ -428,6 +468,17 @@ export function AgentWorkspace({
                   <p>{activePlan.summary}</p>
                 </div>
                 <span>{activePlan.status}</span>
+                {canWrite && (
+                  <button
+                    type="button"
+                    disabled={Boolean(busy) || readyTasks().length === 0}
+                    onClick={runReadyTasks}
+                  >
+                    {busy === "run-ready"
+                      ? "Running team…"
+                      : `Run ready tasks (${readyTasks().length})`}
+                  </button>
+                )}
               </div>
               <div className="milestone-list">
                 {activePlan.milestones.map((milestone) => (

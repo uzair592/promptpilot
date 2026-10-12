@@ -92,7 +92,9 @@ product idea into ordered discovery, backend, frontend, testing, and release
 milestones. PromptPilot recommends an available provider for each role, allows a
 human to change the assignment, and runs a task only after **Run now** is
 selected. The product manager, API, frontend, backend, and tester roles receive
-the project goal and a saved predecessor handoff. OpenRouter's `openrouter/free`
+the project goal and saved prerequisite handoffs. Frontend and backend can run
+together after their prerequisites; **Run ready tasks** starts independent
+model requests concurrently, and testing waits for both results. OpenRouter's `openrouter/free`
 router is the default free starting
 model; availability and rate limits are controlled by OpenRouter.
 

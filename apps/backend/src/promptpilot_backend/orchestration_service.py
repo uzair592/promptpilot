@@ -157,6 +157,19 @@ PLAN_TEMPLATE = (
     ),
 )
 
+TASK_PREREQUISITES = {
+    "Define scope and success criteria": ("Define product requirements",),
+    "Research technical choices": ("Define scope and success criteria",),
+    "Design API contracts": ("Research technical choices",),
+    "Design backend and data contracts": ("Design API contracts",),
+    "Implement backend foundation": ("Design backend and data contracts",),
+    "Implement the primary interface": ("Design API contracts",),
+    "Run independent quality review": (
+        "Implement backend foundation", "Implement the primary interface"
+    ),
+    "Prepare release decision": ("Run independent quality review",),
+}
+
 
 def _cipher() -> Fernet:
     value = get_settings().provider_key_encryption_key
@@ -308,7 +321,7 @@ def create_project_plan(
             )
         )
     )
-    task_ids: list[str] = []
+    task_ids: dict[str, str] = {}
     task_number = 0
     for position, (title, description, task_specs) in enumerate(PLAN_TEMPLATE, start=1):
         due_at = payload.start_at + timedelta(days=position * 7) if payload.start_at else None
@@ -339,13 +352,15 @@ def create_project_plan(
                 role=role,
                 assignment_reason=reason,
                 acceptance_criteria_json=json.dumps(criteria),
-                dependencies_json=json.dumps(task_ids[-1:] if task_ids else []),
+                dependencies_json=json.dumps(
+                    [task_ids[name] for name in TASK_PREREQUISITES.get(task_title, ())]
+                ),
                 status="scheduled" if scheduled_for else "backlog",
                 scheduled_for=scheduled_for,
             )
             db.add(task)
             db.flush()
-            task_ids.append(str(task.id))
+            task_ids[task_title] = str(task.id)
             task_number += 1
     db.commit()
     db.refresh(plan)
@@ -459,26 +474,35 @@ def execute_agent_task(db: Session, task: AgentTask, connection: ProviderConnect
     if plan is None:
         raise HTTPException(status_code=404, detail="Project plan not found")
     chain: list[AgentTask] = []
-    seen = {task.id}
-    cursor = task
-    while len(chain) < 30:
-        dependencies = [UUID(value) for value in json.loads(cursor.dependencies_json)]
-        if not dependencies:
-            break
-        predecessor = db.get(AgentTask, dependencies[-1])
-        if (
-            predecessor is None
-            or predecessor.id in seen
-            or predecessor.plan_id != task.plan_id
-            or predecessor.status not in {"review", "completed"}
-        ):
-            raise HTTPException(status_code=409, detail="Finish prerequisite tasks before running this one")
-        chain.append(predecessor)
-        seen.add(predecessor.id)
-        cursor = predecessor
+    visited: set[UUID] = set()
+    visiting = {task.id}
+
+    def gather_prerequisites(current: AgentTask) -> None:
+        for value in json.loads(current.dependencies_json):
+            prerequisite_id = UUID(value)
+            if prerequisite_id in visited:
+                continue
+            predecessor = db.get(AgentTask, prerequisite_id)
+            if (
+                predecessor is None
+                or predecessor.id in visiting
+                or predecessor.plan_id != task.plan_id
+                or predecessor.status not in {"review", "completed"}
+                or len(visited) + len(visiting) >= 30
+            ):
+                raise HTTPException(
+                    status_code=409, detail="Finish prerequisite tasks before running this one"
+                )
+            visiting.add(predecessor.id)
+            gather_prerequisites(predecessor)
+            visiting.remove(predecessor.id)
+            visited.add(predecessor.id)
+            chain.append(predecessor)
+
+    gather_prerequisites(task)
     handoff = "\n\n".join(
         f"{item.role}: {item.title}\n{item.output_text[:12000]}"
-        for item in reversed(chain)
+        for item in chain
         if item.output_text
     )[-45000:]
     repository = db.get(ProjectRepository, task.project_id)
