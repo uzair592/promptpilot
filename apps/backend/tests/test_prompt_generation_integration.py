@@ -38,10 +38,10 @@ def test_generation_api_connects_analysis_answers_memory_and_documents(client, m
         session = QuestionSession(project_id=UUID(project_id), conversation_id=UUID(conversation_id), analysis_id=analysis.id, status="active")
         db.add(session)
         db.flush()
-        question = Question(session_id=session.id, gap_id=gap.id, text="Who are the target customers?", question_type="free_text", priority=1, status="answered")
+        question = Question(session_id=session.id, gap_id=gap.id, text="What should the completed result look like?", question_type="free_text", priority=1, status="answered")
         db.add(question)
         db.flush()
-        db.add(Answer(question_id=question.id, content="Wholesale customers across Pakistan", source="user"))
+        db.add(Answer(question_id=question.id, content="Fully functional and using the latest technology", source="user"))
         db.commit()
 
     captured = {}
@@ -63,7 +63,7 @@ def test_generation_api_connects_analysis_answers_memory_and_documents(client, m
     assert captured["payload"]["input"]["original_prompt"] == message["content"]
     assert captured["payload"]["input"]["task_category"] == "marketing"
     assert "Pakistani aluminium foil manufacturer" in str(captured["payload"]["input"]["project_memory"])
-    assert "Wholesale customers across Pakistan" in str(captured["payload"]["input"]["relevant_answers"])
+    assert "Fully functional and using the latest technology" in str(captured["payload"]["input"]["relevant_answers"])
     assert "Wholesale foil delivery" in str(captured["payload"]["input"]["context_package"])
     assert response.json()["optimized_prompt"] == "Create a Pakistan-focused foil marketing plan."
     with SessionLocal() as db:

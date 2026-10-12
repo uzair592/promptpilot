@@ -40,6 +40,7 @@ import {
   assessPromptQuality,
   PromptQuality,
 } from "../../../lib/prompt-quality";
+import { recommendModels } from "../../../lib/model-recommendations";
 
 type ToolView = "quality" | "sources";
 
@@ -64,7 +65,6 @@ export function ConversationWorkspace({
   const [prompts, setPrompts] = useState<GeneratedPrompt[]>([]);
   const [runs, setRuns] = useState<ModelRun[]>([]);
   const [draft, setDraft] = useState("");
-  const [answer, setAnswer] = useState("");
   const [url, setUrl] = useState("");
   const [toolView, setToolView] = useState<ToolView>("quality");
   const [loading, setLoading] = useState(true);
@@ -87,8 +87,13 @@ export function ConversationWorkspace({
     [runs, source],
   );
   const liveQuality = useMemo(
-    () => assessPromptQuality(draft || source?.content || ""),
-    [draft, source],
+    () =>
+      assessPromptQuality(
+        questions?.next_question
+          ? source?.content || ""
+          : draft || source?.content || "",
+      ),
+    [draft, questions?.next_question, source],
   );
 
   const loadDocuments = useCallback(async () => {
@@ -235,6 +240,10 @@ export function ConversationWorkspace({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canWrite || !draft.trim()) return;
+    if (questions?.next_question) {
+      await submitClarification(draft);
+      return;
+    }
 
     await act(
       "improve",
@@ -268,9 +277,8 @@ export function ConversationWorkspace({
     );
   }
 
-  async function submitAnswer(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selected || !source || !questions?.next_question || !answer.trim())
+  async function submitClarification(content: string) {
+    if (!selected || !source || !questions?.next_question || !content.trim())
       return;
     await act(
       "answer",
@@ -278,9 +286,9 @@ export function ConversationWorkspace({
         const result = await answerQuestion(
           selected.id,
           questions.next_question!.id,
-          answer.trim(),
+          content.trim(),
         );
-        setAnswer("");
+        setDraft("");
         setQuestions(result);
         if (result.analysis) setAnalysis(result.analysis);
         if (!result.next_question) await generateFor(selected.id, source.id);
@@ -298,6 +306,7 @@ export function ConversationWorkspace({
           selected.id,
           questions.next_question!.id,
         );
+        setDraft("");
         setQuestions(result);
         if (!result.next_question) await generateFor(selected.id, source.id);
       },
@@ -456,12 +465,14 @@ export function ConversationWorkspace({
                 />
               )}
 
+              {questions && questions.answered_questions.length > 0 && (
+                <ClarificationHistory session={questions} />
+              )}
+
               {questions?.next_question && (
                 <QuestionMessage
                   session={questions}
-                  answer={answer}
-                  setAnswer={setAnswer}
-                  onSubmit={submitAnswer}
+                  onChoose={(value) => void submitClarification(value)}
                   onSkip={skipCurrentQuestion}
                   busy={Boolean(busy)}
                 />
@@ -524,20 +535,36 @@ export function ConversationWorkspace({
                   event.currentTarget.form?.requestSubmit();
                 }
               }}
-              placeholder="Describe what you want to achieve…"
+              placeholder={
+                questions?.next_question
+                  ? "Type your answer to the question above…"
+                  : "Describe what you want to achieve…"
+              }
               rows={2}
-              disabled={!canWrite || busy === "improve"}
-              aria-label="Prompt to improve"
+              disabled={!canWrite || Boolean(busy)}
+              aria-label={
+                questions?.next_question
+                  ? "Clarification answer"
+                  : "Prompt to improve"
+              }
             />
             <button
-              aria-label="Improve prompt"
-              title="Improve prompt"
+              aria-label={
+                questions?.next_question ? "Send answer" : "Improve prompt"
+              }
+              title={
+                questions?.next_question ? "Send answer" : "Improve prompt"
+              }
               disabled={!canWrite || Boolean(busy) || !draft.trim()}
             >
-              {busy === "improve" ? "…" : "↑"}
+              {busy ? "…" : "↑"}
             </button>
           </div>
-          <small>Enter to improve · Shift + Enter for a new line</small>
+          <small>
+            {questions?.next_question
+              ? "Your answer will be saved and included in the improved prompt"
+              : "Enter to improve · Shift + Enter for a new line"}
+          </small>
         </form>
       </main>
 
@@ -638,18 +665,34 @@ function AnalysisMessage({
   );
 }
 
+function ClarificationHistory({ session }: { session: QuestionSession }) {
+  return (
+    <div className="clarification-history">
+      {session.answered_questions.map((item) => (
+        <div
+          key={item.id}
+          className="chat-message from-user clarification-answer"
+        >
+          <div className="message-avatar">You</div>
+          <div className="message-body">
+            <small>Answer to: {item.question}</small>
+            <p>{item.content}</p>
+            <span className="answer-saved">✓ Saved for prompt generation</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function QuestionMessage({
   session,
-  answer,
-  setAnswer,
-  onSubmit,
+  onChoose,
   onSkip,
   busy,
 }: {
   session: QuestionSession;
-  answer: string;
-  setAnswer: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onChoose: (value: string) => void;
   onSkip: () => void;
   busy: boolean;
 }) {
@@ -666,21 +709,16 @@ function QuestionMessage({
               <button
                 type="button"
                 key={option}
-                onClick={() => setAnswer(option)}
+                onClick={() => onChoose(option)}
+                disabled={busy}
               >
                 {option}
               </button>
             ))}
           </div>
         )}
-        <form onSubmit={onSubmit}>
-          <input
-            value={answer}
-            onChange={(event) => setAnswer(event.target.value)}
-            placeholder="Type your answer"
-            disabled={busy}
-          />
-          <button disabled={busy || !answer.trim()}>Continue</button>
+        <div className="question-guidance">
+          <span>Reply in the main box below</span>
           <button
             type="button"
             className="subtle-button"
@@ -689,7 +727,7 @@ function QuestionMessage({
           >
             Skip
           </button>
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -710,6 +748,9 @@ function PromptResult({
   onExecute: (strategy: "baseline" | "promptpilot") => void;
   busy: string;
 }) {
+  const recommendations = recommendModels(
+    `${prompt.original_prompt}\n${prompt.optimized_prompt}`,
+  );
   return (
     <div className="chat-message from-pilot">
       <div className="message-avatar">P</div>
@@ -752,6 +793,34 @@ function PromptResult({
           >
             Test improved
           </button>
+        </div>
+        <div className="model-recommendations">
+          <div className="model-recommendation-heading">
+            <strong>Best AI for this prompt</strong>
+            <span>PromptPilot recommendation</span>
+          </div>
+          <div className="model-recommendation-list">
+            {recommendations.map((recommendation, index) => (
+              <div key={recommendation.id} className="model-recommendation">
+                <div>
+                  <span>{index === 0 ? "Recommended" : "Also suitable"}</span>
+                  <strong>{recommendation.name}</strong>
+                  <small>{recommendation.reason}</small>
+                </div>
+                <a
+                  href={recommendation.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(prompt.optimized_prompt);
+                  }}
+                  title={`Copy the improved prompt and open ${recommendation.name}`}
+                >
+                  Copy &amp; open {recommendation.name} ↗
+                </a>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

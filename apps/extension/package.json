@@ -1,0 +1,10 @@
+{
+  "name": "@promptpilot/extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PromptPilot browser extension for ChatGPT, Claude, and Gemini",
+  "scripts": {
+    "build": "node scripts/validate.mjs",
+    "test": "node scripts/validate.mjs"
+  }
+}

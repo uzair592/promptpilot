@@ -976,19 +976,16 @@ summary {
   margin: 7px 0 14px;
   font-size: 17px;
 }
-.question-message form,
 .url-source {
   display: flex;
   gap: 8px;
 }
-.question-message input,
 .url-source input {
   flex: 1;
   min-width: 0;
   border-color: #d8dbe4;
   border-radius: 9px;
 }
-.question-message form button,
 .url-source button {
   border-radius: 9px;
   background: var(--purple);
@@ -1011,6 +1008,38 @@ summary {
   border-radius: 999px;
   background: #f7f5ff;
   font-size: 11px;
+}
+.question-guidance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border-radius: 9px;
+  color: #6454c8;
+  background: #f6f4ff;
+  font-size: 11px;
+  font-weight: 650;
+}
+.question-guidance button {
+  padding: 7px 11px;
+  border-radius: 8px;
+}
+.clarification-history {
+  display: contents;
+}
+.clarification-answer small {
+  display: block;
+  margin-bottom: 5px;
+  color: #817aa9;
+  font-size: 9px;
+}
+.answer-saved {
+  display: block;
+  margin-top: 6px;
+  color: #367c57;
+  font-size: 9px;
+  font-weight: 700;
 }
 .result-heading {
   display: flex;
@@ -1063,6 +1092,69 @@ summary {
   border-radius: 8px;
   background: var(--purple);
   font-size: 11px;
+}
+.model-recommendations {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #e3e5eb;
+}
+.model-recommendation-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.model-recommendation-heading strong {
+  font-size: 12px;
+}
+.model-recommendation-heading span {
+  color: #8a91a0;
+  font-size: 9px;
+}
+.model-recommendation-list {
+  display: grid;
+  gap: 8px;
+}
+.model-recommendation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px;
+  border: 1px solid #ded9ff;
+  border-radius: 10px;
+  background: #faf9ff;
+}
+.model-recommendation > div {
+  display: grid;
+  gap: 2px;
+}
+.model-recommendation > div > span {
+  color: #6a54dc;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.model-recommendation > div > strong {
+  font-size: 12px;
+}
+.model-recommendation small {
+  max-width: 420px;
+  color: #737b8c;
+  font-size: 9px;
+  line-height: 1.4;
+}
+.model-recommendation a {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--purple);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
 }
 .run-message > p {
   margin: 10px 0;
@@ -1428,10 +1520,11 @@ summary {
   .starter-grid {
     grid-template-columns: 1fr;
   }
-  .question-message form {
-    flex-wrap: wrap;
+  .model-recommendation {
+    align-items: stretch;
+    flex-direction: column;
   }
-  .question-message input {
-    flex-basis: 100%;
+  .model-recommendation a {
+    text-align: center;
   }
 }

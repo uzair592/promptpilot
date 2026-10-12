@@ -33,6 +33,8 @@ importers:
         specifier: ^3.1.2
         version: 3.2.7(@types/node@22.20.1)
 
+  apps/extension: {}
+
   apps/frontend:
     dependencies:
       next:

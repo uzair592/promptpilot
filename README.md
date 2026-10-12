@@ -1,13 +1,26 @@
 # PromptPilot
 
-PromptPilot is an AI context-engineering and prompt-generation workspace built as a university Final Year Project. The product persists projects, conversations, request analysis, clarification answers, project evidence, versioned prompts, model runs, and evaluations.
+PromptPilot improves prompts either directly inside ChatGPT, Claude, and Gemini through a browser extension or in its standalone chat-first web interface. It gives live prompt-quality feedback, recommends missing information conversationally, asks only useful clarification questions, and produces an improved prompt without changing the user's intent.
+
+## Browser extension — fastest examiner demo
+
+The extension needs no Render, Vercel, database, or local server.
+
+1. Open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
+2. Enable **Developer mode**, select **Load unpacked**, and choose `apps/extension`.
+3. Pin PromptPilot and open its toolbar popup.
+4. Paste an OpenRouter API key and select **Save key**.
+5. Open or reload ChatGPT, Claude, or Gemini and type a prompt.
+6. Select the floating **Improve** button, answer any useful questions, then select **Replace prompt**.
+
+PromptPilot shows the score while the user types and never sends the prompt automatically. See [the extension guide](apps/extension/README.md) for privacy and public-release notes.
 
 ## Local product workflow
 
-Requirements: Python 3.12+, Node.js 22, and pnpm 11.10.0 (the pinned workspace package manager).
+Requirements: Python 3.12+, Node.js 22, and pnpm 10.34.6 (the pinned workspace package manager).
 
 ```powershell
-pnpm install
+pnpm install --frozen-lockfile
 cd apps/backend
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
@@ -21,7 +34,7 @@ In a second terminal, from the repository root:
 pnpm --filter @promptpilot/frontend dev
 ```
 
-Open `http://localhost:3000`, register or sign in, create a project and conversation, then follow the eight workspace stages: Request, Analysis, Clarify, Evidence, Context, Generated prompt, Execution, and Evaluation. Next.js proxies same-origin `/api/v1` requests to `BACKEND_ORIGIN` (defaulting to `http://localhost:8000` during development).
+Open `http://localhost:3000`, register or sign in, and use the default PromptPilot workspace. Enter a request in the bottom composer; analysis, recommendations, clarifications, and the improved prompt appear in the chat. Next.js proxies same-origin `/api/v1` requests to `BACKEND_ORIGIN` (defaulting to `http://localhost:8000` during development).
 
 Analysis and clarification have deterministic offline paths. Prompt generation and target-model execution require server-side provider configuration (`LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`). When unavailable, the UI reports that state and does not manufacture a model response. Credentials are never entered in the browser. Heuristic evaluation can compare compatible persisted runs without a judge provider; an LLM-judge method requires its configured provider.
 

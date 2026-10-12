@@ -237,6 +237,14 @@ class AnswerCreateRequest(BaseModel):
     content: str = Field(min_length=1, max_length=10000)
 
 
+class ClarificationAnswerResponse(BaseModel):
+    id: UUID
+    question_id: UUID
+    question: str
+    content: str
+    created_at: datetime
+
+
 class ProjectMemoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
@@ -308,7 +316,8 @@ class QuestionSessionResponse(BaseModel):
     stop_reason: str | None
     next_question: QuestionResponse | None
     analysis: PromptAnalysisResponse | None = None
-    memory_updates: list[ProjectMemoryResponse] = []
+    answered_questions: list[ClarificationAnswerResponse] = Field(default_factory=list)
+    memory_updates: list[ProjectMemoryResponse] = Field(default_factory=list)
 
 
 class PromptGenerateRequest(BaseModel):

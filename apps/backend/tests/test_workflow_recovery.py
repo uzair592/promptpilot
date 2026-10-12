@@ -47,6 +47,25 @@ def test_latest_analysis_and_question_session_recover_after_refresh(client):
     assert questions.status_code == 200
     assert questions.json()["next_question"] is not None
 
+    question = questions.json()["next_question"]
+    answered = client.post(
+        f"/api/v1/conversations/{conversation['id']}/questions/{question['id']}/answers",
+        json={"content": "A complete implementation using current technology"},
+    )
+    assert answered.status_code == 201, answered.text
+    saved_answer = answered.json()["answered_questions"][-1]
+    assert saved_answer["question_id"] == question["id"]
+    assert saved_answer["question"] == question["text"]
+    assert saved_answer["content"] == "A complete implementation using current technology"
+
+    restored_questions = client.get(
+        f"/api/v1/conversations/{conversation['id']}/questions/next"
+    )
+    assert restored_questions.status_code == 200
+    assert restored_questions.json()["answered_questions"][-1]["content"] == (
+        "A complete implementation using current technology"
+    )
+
 
 def test_prompt_versions_recover_with_source_and_generation_metadata(client):
     _, conversation, message = create_workflow(client)
