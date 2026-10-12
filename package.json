@@ -14,6 +14,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "node tests/acceptance/run.mjs",
+    "test:e2e:local": "playwright test --config=playwright.local.config.ts",
     "test:watch": "vitest",
     "format": "prettier --check .",
     "format:write": "prettier --write .",

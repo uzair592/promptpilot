@@ -21,6 +21,7 @@ export default defineConfig({
     ["html", { outputFolder: "playwright-report", open: "never" }],
   ],
   timeout: 120_000,
+  expect: { timeout: 15_000 },
   use: {
     baseURL: "http://127.0.0.1:8131",
     browserName: "chromium",
