@@ -73,11 +73,18 @@ export function ConversationWorkspace({
   const [copied, setCopied] = useState(false);
   const submissionKey = useRef<string | null>(null);
   const chatEnd = useRef<HTMLDivElement | null>(null);
+  const replyBox = useRef<HTMLTextAreaElement | null>(null);
+  const operationInFlight = useRef(false);
+  const loadRequest = useRef(0);
 
   const source = useMemo(
     () => [...messages].reverse().find((item) => item.role === "user") ?? null,
     [messages],
   );
+  const replyContext =
+    questions?.answered_questions
+      .map((answer) => `${answer.question}\n${answer.content}`)
+      .join("\n") || "";
   const currentPrompt = useMemo(
     () => prompts.find((item) => item.source_message_id === source?.id) ?? null,
     [prompts, source],
@@ -90,10 +97,10 @@ export function ConversationWorkspace({
     () =>
       assessPromptQuality(
         questions?.next_question
-          ? source?.content || ""
-          : draft || source?.content || "",
+          ? `${source?.content || ""}\n${replyContext}`
+          : draft || `${source?.content || ""}\n${replyContext}`,
       ),
-    [draft, questions?.next_question, source],
+    [draft, questions?.next_question, source, replyContext],
   );
 
   const loadDocuments = useCallback(async () => {
@@ -102,8 +109,13 @@ export function ConversationWorkspace({
 
   const loadConversation = useCallback(
     async (conversation: Conversation) => {
+      const request = ++loadRequest.current;
       setLoading(true);
       setError("");
+      setDraft("");
+      setMessages([]);
+      setPrompts([]);
+      setRuns([]);
       setAnalysis(null);
       setQuestions(null);
       try {
@@ -116,18 +128,20 @@ export function ConversationWorkspace({
           getRuns(conversation.id),
           loadDocuments(),
         ]);
-        setMessages(history);
-        setPrompts(savedPrompts);
-        setRuns(savedRuns);
+        if (request !== loadRequest.current) return;
+        let savedAnalysis: PromptAnalysis | null = null;
+        let savedQuestions: QuestionSession | null = null;
         if (latestSource) {
           try {
-            const savedAnalysis = await getLatestAnalysis(
+            savedAnalysis = await getLatestAnalysis(
               conversation.id,
               latestSource.id,
             );
-            setAnalysis(savedAnalysis);
             try {
-              setQuestions(await getNextQuestion(conversation.id));
+              savedQuestions = await getNextQuestion(
+                conversation.id,
+                latestSource.id,
+              );
             } catch (questionError) {
               if (!(
                 questionError instanceof ApiError &&
@@ -142,7 +156,14 @@ export function ConversationWorkspace({
               throw analysisError;
           }
         }
+        if (request !== loadRequest.current) return;
+        setMessages(history);
+        setPrompts(savedPrompts);
+        setRuns(savedRuns);
+        setAnalysis(savedAnalysis);
+        setQuestions(savedQuestions);
       } catch (loadError) {
+        if (request !== loadRequest.current) return;
         setError(
           friendlyError(
             loadError,
@@ -150,33 +171,38 @@ export function ConversationWorkspace({
           ),
         );
       } finally {
-        setLoading(false);
+        if (request === loadRequest.current) setLoading(false);
       }
     },
     [loadDocuments],
   );
 
   useEffect(() => {
+    let active = true;
     getConversations(projectId)
       .then((items) => {
+        if (!active) return;
         setConversations(items);
         setSelected(items[0] ?? null);
-        if (!items[0]) {
+        if (items[0]) {
+          void loadConversation(items[0]);
+        } else {
           setLoading(false);
           void loadDocuments().catch(() => undefined);
         }
       })
       .catch((loadError) => {
+        if (!active) return;
         setError(
           friendlyError(loadError, "PromptPilot could not load your chats."),
         );
         setLoading(false);
       });
-  }, [projectId, loadDocuments]);
-
-  useEffect(() => {
-    if (selected) void loadConversation(selected);
-  }, [selected, loadConversation]);
+    return () => {
+      active = false;
+      loadRequest.current += 1;
+    };
+  }, [projectId, loadDocuments, loadConversation]);
 
   useEffect(() => {
     chatEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -187,7 +213,8 @@ export function ConversationWorkspace({
     action: () => Promise<void>,
     fallback: string,
   ) {
-    if (busy) return;
+    if (operationInFlight.current || loading) return;
+    operationInFlight.current = true;
     setBusy(key);
     setError("");
     try {
@@ -195,6 +222,7 @@ export function ConversationWorkspace({
     } catch (actionError) {
       setError(friendlyError(actionError, fallback));
     } finally {
+      operationInFlight.current = false;
       setBusy("");
     }
   }
@@ -212,6 +240,7 @@ export function ConversationWorkspace({
         setPrompts([]);
         setRuns([]);
         setDraft("");
+        submissionKey.current = null;
       },
       "A new chat could not be created.",
     );
@@ -229,17 +258,33 @@ export function ConversationWorkspace({
     ]);
   }
 
+  async function generateAfterSaving(
+    conversationId: string,
+    messageId: string,
+  ) {
+    setBusy("generate");
+    try {
+      await generateFor(conversationId, messageId);
+    } catch (generationError) {
+      setError(
+        `Your prompt and replies are saved, but the model could not generate the improved prompt. ${friendlyError(generationError, "Check the backend model settings or connection.")} Use Retry generation below; you do not need to re-enter your answers.`,
+      );
+    }
+  }
+
   async function analyzeAndContinue(conversationId: string, messageId: string) {
     const result = await analyzeMessage(conversationId, messageId);
     setAnalysis(result);
-    const session = await getNextQuestion(conversationId);
+    const session = await getNextQuestion(conversationId, messageId);
     setQuestions(session);
-    if (!session.next_question) await generateFor(conversationId, messageId);
+    if (!session.next_question)
+      await generateAfterSaving(conversationId, messageId);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canWrite || !draft.trim()) return;
+    if (!canWrite || loading || !draft.trim() || operationInFlight.current)
+      return;
     if (questions?.next_question) {
       await submitClarification(draft);
       return;
@@ -249,11 +294,10 @@ export function ConversationWorkspace({
       "improve",
       async () => {
         let conversation = selected;
-        let createdConversation = false;
         if (!conversation) {
           conversation = await createConversation(projectId, "New prompt");
-          createdConversation = true;
           setConversations((items) => [conversation!, ...items]);
+          setSelected(conversation);
         }
         const content = draft.trim();
         submissionKey.current ??= crypto.randomUUID();
@@ -271,14 +315,19 @@ export function ConversationWorkspace({
           items.filter((item) => item.source_message_id !== message.id),
         );
         await analyzeAndContinue(conversation.id, message.id);
-        if (createdConversation) setSelected(conversation);
       },
       "PromptPilot could not improve this prompt. Your text remains available to retry.",
     );
   }
 
   async function submitClarification(content: string) {
-    if (!selected || !source || !questions?.next_question || !content.trim())
+    if (
+      !canWrite ||
+      !selected ||
+      !source ||
+      !questions?.next_question ||
+      !content.trim()
+    )
       return;
     await act(
       "answer",
@@ -288,12 +337,20 @@ export function ConversationWorkspace({
           questions.next_question!.id,
           content.trim(),
         );
+        const receipt = result.answered_questions.find(
+          (answer) =>
+            answer.question_id === questions.next_question!.id &&
+            answer.content === content.trim(),
+        );
+        if (!receipt)
+          throw new Error("The server did not confirm the reply was saved.");
         setDraft("");
         setQuestions(result);
         if (result.analysis) setAnalysis(result.analysis);
-        if (!result.next_question) await generateFor(selected.id, source.id);
+        if (!result.next_question)
+          await generateAfterSaving(selected.id, source.id);
       },
-      "Your answer could not be saved. Retry when ready.",
+      "Your reply was not confirmed. Your text is still in the box; send it again to safely retry.",
     );
   }
 
@@ -308,7 +365,8 @@ export function ConversationWorkspace({
         );
         setDraft("");
         setQuestions(result);
-        if (!result.next_question) await generateFor(selected.id, source.id);
+        if (!result.next_question)
+          await generateAfterSaving(selected.id, source.id);
       },
       "PromptPilot could not skip that question.",
     );
@@ -320,6 +378,15 @@ export function ConversationWorkspace({
       "generate",
       () => generateFor(selected.id, source.id),
       "The improved prompt could not be generated.",
+    );
+  }
+
+  async function resumeSavedPrompt() {
+    if (!selected || !source) return;
+    await act(
+      "improve",
+      () => analyzeAndContinue(selected.id, source.id),
+      "Your prompt is saved, but analysis could not finish. Retry this step without submitting a new prompt.",
     );
   }
 
@@ -369,7 +436,7 @@ export function ConversationWorkspace({
         <button
           className="new-chat-button"
           onClick={newConversation}
-          disabled={!canWrite || Boolean(busy)}
+          disabled={!canWrite || loading || Boolean(busy)}
         >
           <span>＋</span> New prompt
         </button>
@@ -398,7 +465,11 @@ export function ConversationWorkspace({
               <button
                 key={item.id}
                 className={selected?.id === item.id ? "chat-active" : ""}
-                onClick={() => setSelected(item)}
+                disabled={loading || Boolean(busy)}
+                onClick={() => {
+                  setSelected(item);
+                  void loadConversation(item);
+                }}
               >
                 <span>⌁</span>
                 <span>{item.title}</span>
@@ -465,6 +536,25 @@ export function ConversationWorkspace({
                 />
               )}
 
+              {source && !analysis && !busy && (
+                <section className="generation-recovery" role="status">
+                  <strong>
+                    Your prompt is saved; analysis still needs to finish
+                  </strong>
+                  <p>
+                    Continue with this saved text instead of submitting it
+                    again.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={resumeSavedPrompt}
+                    disabled={!canWrite}
+                  >
+                    Continue saved prompt
+                  </button>
+                </section>
+              )}
+
               {questions && questions.answered_questions.length > 0 && (
                 <ClarificationHistory session={questions} />
               )}
@@ -474,6 +564,7 @@ export function ConversationWorkspace({
                   session={questions}
                   onChoose={(value) => void submitClarification(value)}
                   onSkip={skipCurrentQuestion}
+                  onReply={() => replyBox.current?.focus()}
                   busy={Boolean(busy)}
                 />
               )}
@@ -504,6 +595,34 @@ export function ConversationWorkspace({
                 />
               )}
 
+              {source &&
+                analysis &&
+                questions?.status === "completed" &&
+                !currentPrompt && (
+                  <section className="generation-recovery" role="status">
+                    <strong>
+                      {busy === "generate"
+                        ? "Sending your saved answers to the model…"
+                        : "Your prompt and replies are saved"}
+                    </strong>
+                    <p>
+                      The improved prompt will use the saved clarification
+                      answers. You do not need to type them again.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={!canWrite || Boolean(busy)}
+                      onClick={regenerate}
+                    >
+                      {busy === "generate"
+                        ? "Generating…"
+                        : error
+                          ? "Retry generation"
+                          : "Generate improved prompt"}
+                    </button>
+                  </section>
+                )}
+
               {relatedRuns.map((run) => (
                 <RunMessage key={run.id} run={run} />
               ))}
@@ -519,6 +638,12 @@ export function ConversationWorkspace({
         </div>
 
         <form className="bottom-composer" onSubmit={submit}>
+          {questions?.next_question && (
+            <div className="reply-target" id="reply-target">
+              <strong>Replying to PromptPilot</strong>
+              <span>{questions.next_question.text}</span>
+            </div>
+          )}
           <div className="composer-quality">
             <span
               className={`quality-dot quality-${qualityTone(liveQuality.score)}`}
@@ -527,10 +652,15 @@ export function ConversationWorkspace({
           </div>
           <div className="composer-box">
             <textarea
+              ref={replyBox}
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
                   event.preventDefault();
                   event.currentTarget.form?.requestSubmit();
                 }
@@ -541,7 +671,10 @@ export function ConversationWorkspace({
                   : "Describe what you want to achieve…"
               }
               rows={2}
-              disabled={!canWrite || Boolean(busy)}
+              disabled={!canWrite || loading || Boolean(busy)}
+              aria-describedby={
+                questions?.next_question ? "reply-target" : undefined
+              }
               aria-label={
                 questions?.next_question
                   ? "Clarification answer"
@@ -555,9 +688,15 @@ export function ConversationWorkspace({
               title={
                 questions?.next_question ? "Send answer" : "Improve prompt"
               }
-              disabled={!canWrite || Boolean(busy) || !draft.trim()}
+              disabled={!canWrite || loading || Boolean(busy) || !draft.trim()}
             >
-              {busy ? "…" : "↑"}
+              {busy === "answer"
+                ? "Saving reply…"
+                : busy
+                  ? "Working…"
+                  : questions?.next_question
+                    ? "Send answer"
+                    : "Improve prompt"}
             </button>
           </div>
           <small>
@@ -619,6 +758,7 @@ function AnalysisMessage({
   analysis: PromptAnalysis | null;
   busy: boolean;
 }) {
+  const gaps = analysis?.gaps.filter((gap) => gap.status !== "resolved") || [];
   if (!analysis)
     return (
       <div className="assistant-thinking">
@@ -640,15 +780,15 @@ function AnalysisMessage({
                 : "I can make this much stronger"}
             </h3>
             <p>
-              {analysis.gaps.length === 0
+              {gaps.length === 0
                 ? "Your goal and instructions are clear. I’m preparing the improved version."
-                : `I found ${analysis.gaps.length} area${analysis.gaps.length === 1 ? "" : "s"} that could reduce answer quality.`}
+                : `I found ${gaps.length} area${gaps.length === 1 ? "" : "s"} that could reduce answer quality.`}
             </p>
           </div>
         </div>
-        {analysis.gaps.length > 0 && (
+        {gaps.length > 0 && (
           <div className="recommendation-list">
-            {analysis.gaps.slice(0, 4).map((gap) => (
+            {gaps.slice(0, 4).map((gap) => (
               <div key={gap.id}>
                 <span className={`severity-dot severity-${gap.severity}`} />
                 <div>
@@ -689,11 +829,13 @@ function QuestionMessage({
   session,
   onChoose,
   onSkip,
+  onReply,
   busy,
 }: {
   session: QuestionSession;
   onChoose: (value: string) => void;
   onSkip: () => void;
+  onReply: () => void;
   busy: boolean;
 }) {
   const question = session.next_question!;
@@ -719,6 +861,9 @@ function QuestionMessage({
         )}
         <div className="question-guidance">
           <span>Reply in the main box below</span>
+          <button type="button" onClick={onReply} disabled={busy}>
+            Reply
+          </button>
           <button
             type="button"
             className="subtle-button"
@@ -864,6 +1009,7 @@ function QualityPanel({
   analysis: PromptAnalysis | null;
 }) {
   const score = analysis?.overall_score ?? quality.score;
+  const gap = analysis?.gaps.find((item) => item.status !== "resolved");
   return (
     <div className="tool-panel-content">
       <div className="tool-panel-heading">
@@ -903,10 +1049,10 @@ function QualityPanel({
           </div>
         ))}
       </div>
-      {analysis && analysis.gaps.length > 0 && (
+      {gap && (
         <div className="next-improvement">
           <strong>Best next improvement</strong>
-          <p>{analysis.gaps[0].description}</p>
+          <p>{gap.description}</p>
         </div>
       )}
     </div>

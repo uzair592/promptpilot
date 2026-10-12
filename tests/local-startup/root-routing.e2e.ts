@@ -45,24 +45,20 @@ test("root routes through registration, persisted session, and logout", async ({
   );
   await page.getByRole("button", { name: "Create account" }).click();
   expect((await registration).status()).toBe(201);
-  await expect(page).toHaveURL("http://localhost:3000/dashboard");
-  await expect(
-    page.getByRole("heading", { name: "Welcome, Local Startup User" }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+$/);
+  await expect(page.getByText("PromptPilot", { exact: true })).toBeVisible();
   await page.screenshot({
     path: `${screenshotDirectory}/dashboard.png`,
     fullPage: true,
   });
 
   await page.reload();
-  await expect(
-    page.getByRole("heading", { name: "Welcome, Local Startup User" }),
-  ).toBeVisible();
+  await expect(page.getByText("PromptPilot", { exact: true })).toBeVisible();
   expect((await page.request.get("/api/v1/auth/me")).status()).toBe(200);
 
   await page.goto("http://localhost:3000/");
-  await expect(page).toHaveURL("http://localhost:3000/dashboard");
-  await page.getByRole("button", { name: "Log out" }).click();
+  await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+$/);
+  await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL("http://localhost:3000/login");
   expect((await page.request.get("/api/v1/auth/me")).status()).toBe(401);
   await page.goto("http://localhost:3000/dashboard");

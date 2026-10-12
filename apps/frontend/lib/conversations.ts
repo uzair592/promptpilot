@@ -316,8 +316,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = "The request could not be completed.";
     try {
-      const body = (await response.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      const body = (await response.json()) as {
+        detail?: string;
+        error?: { message?: string };
+      };
+      detail = body.error?.message || body.detail || detail;
     } catch {}
     throw new ApiError(detail, response.status);
   }
@@ -375,9 +378,9 @@ export const getLatestAnalysis = (conversationId: string, messageId: string) =>
   api<PromptAnalysis>(
     `/api/v1/conversations/${conversationId}/messages/${messageId}/analysis`,
   );
-export const getNextQuestion = (conversationId: string) =>
+export const getNextQuestion = (conversationId: string, messageId?: string) =>
   api<QuestionSession>(
-    `/api/v1/conversations/${conversationId}/questions/next`,
+    `/api/v1/conversations/${conversationId}/questions/next${messageId ? `?message_id=${encodeURIComponent(messageId)}` : ""}`,
   );
 export const answerQuestion = (
   conversationId: string,

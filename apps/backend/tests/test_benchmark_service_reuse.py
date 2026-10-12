@@ -324,9 +324,25 @@ def test_question_injected_calls_duplicate_and_failed_fallbacks(client, monkeypa
         session = create_session_with_gap(db, project_id, conversation_id, message_id)
         first = next_question(db, session, provider=provider, observer=events.append)
         assert first.source == "ai"
+        restored = next_question(db, session, provider=provider, observer=events.append)
+        assert restored.id == first.id
+        assert provider.calls == 1
+        service.mark_question_skipped(db, session, first)
+        db.add(
+            InformationGap(
+                analysis_id=session.analysis_id,
+                dimension="context",
+                title="Background",
+                description="Background is missing",
+                severity="important",
+                importance="high",
+                question_target="What background should I use?",
+            )
+        )
+        db.commit()
         second = next_question(db, session, provider=provider, observer=events.append)
         assert second.source == "fallback"
-        assert second.text == "Who is the audience?"
+        assert second.text == "What background should I use?"
         assert first.id != second.id
     assert provider.calls == 2
     assert_attempt(events[0], "question", "succeeded")
@@ -345,9 +361,7 @@ def test_question_injected_calls_duplicate_and_failed_fallbacks(client, monkeypa
 
     failed_events = []
     with SessionLocal() as db:
-        session = db.scalar(
-            select(QuestionSession).where(QuestionSession.conversation_id == conversation_id)
-        )
+        session = create_session_with_gap(db, project_id, conversation_id, message_id)
         fallback = next_question(
             db, session, provider=FailingProvider(), observer=failed_events.append
         )
@@ -369,9 +383,7 @@ def test_question_injected_calls_duplicate_and_failed_fallbacks(client, monkeypa
 
     invalid_events = []
     with SessionLocal() as db:
-        session = db.scalar(
-            select(QuestionSession).where(QuestionSession.conversation_id == conversation_id)
-        )
+        session = create_session_with_gap(db, project_id, conversation_id, message_id)
         fallback = next_question(
             db, session, provider=InvalidProvider(), observer=invalid_events.append
         )

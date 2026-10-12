@@ -180,16 +180,16 @@
     return response.result;
   }
 
-  function showQuestions(result, quality) {
+  function showQuestions(result, quality, answers = [], error = "") {
     latestResult = result;
     const fields = result.questions
       .map(
         (question, index) =>
-          `<div class="pp-question"><label for="pp-q-${index}">${escapeHtml(question.question)}</label><textarea id="pp-q-${index}" data-index="${index}" placeholder="${escapeHtml(question.placeholder)}"></textarea></div>`,
+          `<div class="pp-question"><label for="pp-q-${index}">${escapeHtml(question.question)}</label><textarea id="pp-q-${index}" data-index="${index}" placeholder="${escapeHtml(question.placeholder)}">${escapeHtml(answers[index]?.answer || "")}</textarea></div>`,
       )
       .join("");
     openModal(
-      `${qualityMarkup(quality)}<p class="pp-summary">${escapeHtml(result.summary)}</p>${fields}<div class="pp-actions"><button class="pp-button" data-action="skip">Skip questions</button><button class="pp-button primary" data-action="continue">Create improved prompt</button></div>`,
+      `${qualityMarkup(quality)}<p class="pp-summary">${escapeHtml(result.summary)}</p><p class="pp-muted">Reply to each question below, then send your answers to PromptPilot.</p>${error ? `<div class="pp-error" role="alert">${escapeHtml(error)} Your replies are preserved below. Please retry.</div>` : ""}${fields}<div class="pp-actions"><button class="pp-button" data-action="skip">Skip questions</button><button class="pp-button primary" data-action="continue">Send answers & improve</button></div>`,
     );
   }
 
@@ -239,12 +239,17 @@
   }
 
   async function finishImprovement(skipAnswers) {
-    const answers = latestResult.questions.map((question, index) => ({
+    if (busy) return;
+    const questionResult = latestResult;
+    const savedReplies = questionResult.questions.map((question, index) => ({
       question: question.question,
-      answer: skipAnswers
-        ? ""
-        : body.querySelector(`[data-index="${index}"]`)?.value.trim() || "",
+      answer: body.querySelector(`[data-index="${index}"]`)?.value.trim() || "",
     }));
+    const answers = skipAnswers
+      ? savedReplies.map((reply) => ({ ...reply, answer: "" }))
+      : savedReplies;
+    busy = true;
+    launcher.disabled = true;
     openModal(
       '<div class="pp-spinner"></div><p class="pp-muted" style="text-align:center">Building the improved prompt…</p>',
     );
@@ -258,7 +263,15 @@
         throw new Error("The model did not return an improved prompt.");
       showResult(result);
     } catch (error) {
-      showError(error.message);
+      showQuestions(
+        questionResult,
+        globalThis.PromptPilotQuality.assess(originalPrompt),
+        savedReplies,
+        error.message,
+      );
+    } finally {
+      busy = false;
+      launcher.disabled = false;
     }
   }
 
