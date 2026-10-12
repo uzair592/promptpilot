@@ -7,6 +7,10 @@ test("registers, completes, and restores the persistent product workflow", async
 }) => {
   const email = `acceptance-${Date.now()}@example.com`;
   const password = "acceptance-test-password";
+  const providerAtStart = await page.request.get(
+    "http://127.0.0.1:8132/health",
+  );
+  const initialProviderCount = (await providerAtStart.json()).request_count;
   const screenshotDirectory = "test-results/screenshots";
   mkdirSync(screenshotDirectory, { recursive: true });
 
@@ -64,7 +68,9 @@ test("registers, completes, and restores the persistent product workflow", async
   const providerBeforeWorkflow = await page.request.get(
     "http://127.0.0.1:8132/health",
   );
-  expect((await providerBeforeWorkflow.json()).request_count).toBe(0);
+  expect((await providerBeforeWorkflow.json()).request_count).toBe(
+    initialProviderCount,
+  );
 
   const logoutResponse = page.waitForResponse(
     (candidate) =>
@@ -201,5 +207,7 @@ test("registers, completes, and restores the persistent product workflow", async
   );
   const fakeProviderHealth = await fakeProviderResponse.json();
   expect(fakeProviderHealth).toMatchObject({ status: "ok" });
-  expect(fakeProviderHealth.request_count).toBeGreaterThan(0);
+  expect(fakeProviderHealth.request_count).toBeGreaterThan(
+    initialProviderCount,
+  );
 });

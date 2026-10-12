@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test("saves replies, restores pending questions, and retries generation with the same answers", async ({
   page,
 }) => {
+  const errorNotice = page.locator(".chat-error[role='alert']");
   const email = `reply-recovery-${Date.now()}@example.com`;
   await page.goto("/register");
   await page.getByLabel("Display name").fill("Reply Recovery");
@@ -50,9 +51,7 @@ test("saves replies, restores pending questions, and retries generation with the
     }
   });
   await page.getByRole("button", { name: "Send answer" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Your reply was not confirmed",
-  );
+  await expect(errorNotice).toContainText("Your reply was not confirmed");
   await expect(answerBox).toHaveValue("Three bullet points");
   await page.getByRole("button", { name: "Send answer" }).click();
   await expect(page.locator(".clarification-answer p")).toHaveText([
@@ -75,12 +74,8 @@ test("saves replies, restores pending questions, and retries generation with the
   await expect(answerBox).toBeEnabled();
   await answerBox.fill("Keep it informal and short");
   await page.getByRole("button", { name: "Send answer" }).click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Your prompt and replies are saved",
-  );
-  await expect(page.getByRole("alert")).toContainText(
-    "Simulated model timeout",
-  );
+  await expect(errorNotice).toContainText("Your prompt and replies are saved");
+  await expect(errorNotice).toContainText("Simulated model timeout");
   await expect(
     page.getByRole("button", { name: "Retry generation" }),
   ).toBeEnabled();
