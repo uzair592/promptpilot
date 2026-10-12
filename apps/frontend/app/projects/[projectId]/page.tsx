@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -32,19 +31,12 @@ export default function ProjectPage() {
         setError("Project not found or unavailable.");
       });
   }, [params.projectId, router]);
-  async function archive() {
-    const response = await fetch(
-      `/api/v1/projects/${params.projectId}/archive`,
-      { method: "POST", credentials: "include" },
-    );
-    if (response.ok) setProject(await response.json());
-  }
   if (error)
     return (
       <main className="shell">
         <section className="panel">
           <p className="error">{error}</p>
-          <Link href="/dashboard">Back to dashboard</Link>
+          <a href="/dashboard">Back to dashboard</a>
         </section>
       </main>
     );
@@ -54,31 +46,11 @@ export default function ProjectPage() {
         <p className="muted">Loading project...</p>
       </main>
     );
-  const canArchive =
-    project.current_user_role === "owner" && project.status === "active";
   return (
-    <main className="main project-page">
-      <div className="row">
-        <Link href="/dashboard">Back to projects</Link>
-        {canArchive && (
-          <button className="secondary" onClick={archive}>
-            Archive project
-          </button>
-        )}
-      </div>
-      <section className="project-header">
-        <p className="muted">
-          {project.domain || "General Task"} · {project.status}
-        </p>
-        <h1>{project.name}</h1>
-        <p className="muted">{project.description || "No description yet."}</p>
-        <small>
-          Your role: {project.current_user_role} · Created{" "}
-          {new Date(project.created_at).toLocaleDateString()}
-        </small>
-      </section>
+    <main className="promptpilot-app">
       <ConversationWorkspace
         projectId={params.projectId}
+        projectName={project.name}
         canWrite={
           project.current_user_role !== "member" && project.status === "active"
         }
