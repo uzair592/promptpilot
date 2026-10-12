@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 
 const port = Number(process.env.PROMPTPILOT_FAKE_PROVIDER_PORT ?? "8132");
 let requestCount = 0;
+const generationInputs = [];
 
 function contentFor(body) {
   const format = body.response_format?.json_schema;
@@ -23,16 +24,21 @@ function contentFor(body) {
       });
     case "generated_question":
       return JSON.stringify({
-        question_text: "What is the primary audience?",
+        question_text:
+          parsedInput.gap_target || "What is the primary audience?",
         question_type: "free_text",
         related_gap: parsedInput.gap_id,
         priority: parsedInput.priority ?? 1,
         rationale: "This acceptance question is generated locally.",
       });
     case "prompt_generation":
+      generationInputs.push(parsedInput.input);
       return JSON.stringify({
         optimized_prompt:
-          "Write a concise plan for the supplied request without inventing facts.",
+          "Write a concise plan for the supplied request without inventing facts.\n" +
+          (parsedInput.input?.relevant_answers || [])
+            .map((item) => `${item.question}: ${item.content}`)
+            .join("\n"),
         task_summary: "Create a concise plan.",
         assumptions: [],
         incorporated_context: [],
@@ -71,7 +77,13 @@ function contentFor(body) {
 const server = createServer((request, response) => {
   if (request.method === "GET" && request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ status: "ok", request_count: requestCount }));
+    response.end(
+      JSON.stringify({
+        status: "ok",
+        request_count: requestCount,
+        generation_inputs: generationInputs,
+      }),
+    );
     return;
   }
   if (request.method !== "POST" || request.url !== "/v1/chat/completions") {

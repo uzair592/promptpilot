@@ -139,6 +139,8 @@ class ContextAssembler:
         used = 0
         for candidate in candidates:
             key = normalized(candidate.content)
+            if candidate.source_type == "answer":
+                key = f"answer:{candidate.metadata['question_id']}:{key}"
             if not key:
                 continue
             if key in seen:
@@ -152,7 +154,7 @@ class ContextAssembler:
             selected.append(candidate)
             used += len(candidate.content)
         def values(source: str) -> list[dict[str, str]]:
-            return [{"content": item.content, "source": item.metadata.get("source", item.source_type), "provenance": item.provenance, "why_included": "Matched task terms and source authority."} for item in selected if item.source_type == source]
+            return [{"content": item.content, "source": item.metadata.get("source", item.source_type), "provenance": item.provenance, "why_included": "Matched task terms and source authority.", **({"question": item.metadata["question"], "question_id": item.metadata["question_id"]} if item.source_type == "answer" else {})} for item in selected if item.source_type == source]
         return ContextPackage(input_data.task, values("memory"), values("answer"), values("requirement"), values("constraint"), [item for item in selected if item.source_type == "document"], [{"source_type": item.source_type, "identifier": item.identifier, "provenance": item.provenance, "score": f"{item.score:.4f}", "why_included": "Matched task terms and source authority."} for item in selected], omissions, input_data.context_budget, used)
 
 

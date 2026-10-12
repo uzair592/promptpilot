@@ -1,10 +1,14 @@
 import json
+from dataclasses import replace
+from io import BytesIO
+from urllib.error import URLError
 from uuid import UUID
 
+import pytest
 from sqlalchemy import select
 
 from promptpilot_backend.db import SessionLocal
-from promptpilot_backend.models import PromptAnalysis, PromptVersion
+from promptpilot_backend.models import Answer, PromptAnalysis, PromptVersion, Question
 
 
 def create_workflow(client):
@@ -58,12 +62,150 @@ def test_latest_analysis_and_question_session_recover_after_refresh(client):
     assert saved_answer["question"] == question["text"]
     assert saved_answer["content"] == "A complete implementation using current technology"
 
-    restored_questions = client.get(
-        f"/api/v1/conversations/{conversation['id']}/questions/next"
-    )
+    restored_questions = client.get(f"/api/v1/conversations/{conversation['id']}/questions/next")
     assert restored_questions.status_code == 200
     assert restored_questions.json()["answered_questions"][-1]["content"] == (
         "A complete implementation using current technology"
+    )
+
+
+def test_refresh_restores_the_same_pending_question(client):
+    _, conversation, message = create_workflow(client)
+    client.post(
+        f"/api/v1/conversations/{conversation['id']}/messages/{message['id']}/analysis?mode=baseline"
+    )
+    path = f"/api/v1/conversations/{conversation['id']}/questions/next"
+    first = client.get(path).json()
+    second = client.get(path).json()
+    assert second["next_question"]["id"] == first["next_question"]["id"]
+    with SessionLocal() as db:
+        questions = list(db.scalars(select(Question)))
+        assert len(questions) == 1
+
+
+def test_short_answers_complete_without_repeating_answered_gaps(client):
+    _, conversation, message = create_workflow(client)
+    client.post(
+        f"/api/v1/conversations/{conversation['id']}/messages/{message['id']}/analysis?mode=baseline"
+    )
+    root = f"/api/v1/conversations/{conversation['id']}"
+    session = client.get(f"{root}/questions/next").json()
+    seen_questions = set()
+    for content in ("Three bullet points", "Keep it informal and short", "No other preferences"):
+        question = session["next_question"]
+        if question is None:
+            break
+        assert question["text"] not in seen_questions
+        seen_questions.add(question["text"])
+        response = client.post(
+            f"{root}/questions/{question['id']}/answers", json={"content": content}
+        )
+        assert response.status_code == 201, response.text
+        session = response.json()
+        assert session["answered_questions"][-1]["content"] == content
+    assert session["status"] == "completed"
+    assert session["next_question"] is None
+    assert client.get(f"{root}/questions/next").json()["next_question"] is None
+
+
+def test_retry_of_acknowledged_answer_is_safe(client):
+    _, conversation, message = create_workflow(client)
+    client.post(
+        f"/api/v1/conversations/{conversation['id']}/messages/{message['id']}/analysis?mode=baseline"
+    )
+    root = f"/api/v1/conversations/{conversation['id']}"
+    question = client.get(f"{root}/questions/next").json()["next_question"]
+    path = f"{root}/questions/{question['id']}/answers"
+    first = client.post(path, json={"content": "Three bullet points"})
+    retry = client.post(path, json={"content": "Three bullet points"})
+    assert first.status_code == retry.status_code == 201
+    assert first.json()["answered_questions"] == retry.json()["answered_questions"]
+    assert first.json()["next_question"] == retry.json()["next_question"]
+    with SessionLocal() as db:
+        assert len(list(db.scalars(select(Answer)))) == 1
+    assert client.post(path, json={"content": "A different reply"}).status_code == 409
+
+
+@pytest.mark.parametrize("reply", ["Yes, please", "x" * 9000])
+def test_saved_replies_reach_the_actual_model_request_after_generation_failure(
+    client, monkeypatch, reply
+):
+    _, conversation, message = create_workflow(client)
+    root = f"/api/v1/conversations/{conversation['id']}"
+    client.post(f"{root}/messages/{message['id']}/analysis?mode=baseline")
+    session = client.get(f"{root}/questions/next").json()
+    replies = []
+    for _ in range(3):
+        question = session["next_question"]
+        if question is None:
+            break
+        # The same short reply to different questions must preserve both Q/A pairs.
+        content = reply
+        replies.append((question["text"], content))
+        result = client.post(
+            f"{root}/questions/{question['id']}/answers", json={"content": content}
+        )
+        assert result.status_code == 201
+        session = result.json()
+    assert session["status"] == "completed"
+    assert len(replies) == 2
+
+    import promptpilot_backend.llm_provider as provider_module
+
+    settings = replace(
+        provider_module.get_settings(),
+        llm_provider="offline-test",
+        llm_base_url="https://provider.example.invalid/v1",
+        llm_model="test-model",
+        llm_api_key="synthetic-test-key",
+    )
+    monkeypatch.setattr(provider_module, "get_settings", lambda: settings)
+    requests = []
+
+    def fake_urlopen(request, *, timeout):
+        body = json.loads(request.data)
+        payload = json.loads(body["messages"][-1]["content"])
+        requests.append(payload)
+        if len(requests) == 1:
+            raise URLError("Simulated offline failure")
+        result = {
+            "optimized_prompt": "Write a launch plan using the saved clarification replies.",
+            "task_summary": "Launch plan",
+            "assumptions": [],
+            "incorporated_context": [],
+            "incorporated_requirements": [],
+            "output_format": "Plan",
+            "quality_notes": [],
+            "warnings": [],
+            "generation_metadata": {},
+        }
+        return BytesIO(
+            json.dumps({"choices": [{"message": {"content": json.dumps(result)}}]}).encode()
+        )
+
+    monkeypatch.setattr(provider_module, "urlopen", fake_urlopen)
+    path = f"{root}/prompts/generate"
+    assert client.post(path, json={"message_id": message["id"]}).status_code == 503
+    restored = client.get(f"{root}/questions/next").json()
+    assert len(restored["answered_questions"]) == 2
+    generated = client.post(path, json={"message_id": message["id"]})
+    assert generated.status_code == 200, generated.text
+    for payload in requests:
+        sent = payload["input"]["relevant_answers"]
+        assert {(item["question"], item["content"]) for item in sent} == set(replies)
+        assert payload["input"]["original_prompt"] == message["content"]
+        assert payload["input"]["analysis_gaps"] == []
+
+
+def test_new_prompt_does_not_recover_previous_prompt_questions(client):
+    _, conversation, message = create_workflow(client)
+    root = f"/api/v1/conversations/{conversation['id']}"
+    client.post(f"{root}/messages/{message['id']}/analysis?mode=baseline")
+    first = client.get(f"{root}/questions/next").json()
+    client.post(f"{root}/messages", json={"role": "user", "content": "A different task"})
+    assert client.get(f"{root}/questions/next").status_code == 404
+    assert (
+        client.get(f"{root}/questions/next?message_id={message['id']}").json()["id"] == first["id"]
     )
 
 

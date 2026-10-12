@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .context_engine import ContextAssembler, ContextAssemblyInput
 from .llm_provider import OpenAICompatibleProvider, ProviderUnavailable
-from .models import Message, PromptAnalysis, PromptVersion
+from .models import Answer, Message, PromptAnalysis, PromptVersion, Question, QuestionSession
 
 GENERATION_MODES = {"structured", "minimal", "detailed"}
 
@@ -99,9 +99,13 @@ def _candidate_ids(package: Any) -> list[str]:
 
 
 def build_generation_input(db: Session, message: Message, analysis: PromptAnalysis | None, mode: str, instruction: str = "") -> tuple[PromptGenerationInput, Any]:
-    package = ContextAssembler().assemble(db, ContextAssemblyInput(project_id=analysis.project_id if analysis else message.conversation.project_id, task=message.content, conversation_id=message.conversation_id, message_id=message.id, analysis_id=analysis.id if analysis else None))
+    answer_size = db.scalar(select(func.sum(func.length(Answer.content))).join(Question, Question.id == Answer.question_id).join(QuestionSession, QuestionSession.id == Question.session_id).join(PromptAnalysis, PromptAnalysis.id == QuestionSession.analysis_id).where(PromptAnalysis.message_id == message.id, QuestionSession.conversation_id == message.conversation_id, Answer.source == "user")) or 0
+    budget = 8000 + int(answer_size)
+    if budget > 100_000:
+        raise ValueError("Saved replies exceed the supported generation context limit; shorten the request in a new conversation. Your replies remain saved.")
+    package = ContextAssembler().assemble(db, ContextAssemblyInput(project_id=analysis.project_id if analysis else message.conversation.project_id, task=message.content, conversation_id=message.conversation_id, message_id=message.id, analysis_id=analysis.id if analysis else None, context_budget=budget))
     analysis_data = {"id": str(analysis.id), "task_category": analysis.task_category} if analysis else {}
-    data = PromptGenerationInput(original_prompt=message.content, task_category=analysis.task_category if analysis else "general", prompt_analysis=analysis_data, analysis_score=analysis.overall_score if analysis else None, analysis_gaps=[{"title": gap.title, "description": gap.description} for gap in analysis.gaps] if analysis else [], relevant_answers=package.user_answers, project_memory=package.project_memory, requirements=package.requirements, constraints=package.constraints, context_package={"task": package.task, "sources": package.sources, "document_context": [item.__dict__ for item in package.document_context], "allowed_source_ids": _candidate_ids(package)}, generation_instructions=instruction, mode=mode)
+    data = PromptGenerationInput(original_prompt=message.content, task_category=analysis.task_category if analysis else "general", prompt_analysis=analysis_data, analysis_score=analysis.overall_score if analysis else None, analysis_gaps=[{"title": gap.title, "description": gap.description} for gap in analysis.gaps if gap.status in {"unresolved", "partially_resolved"}] if analysis else [], relevant_answers=package.user_answers, project_memory=package.project_memory, requirements=package.requirements, constraints=package.constraints, context_package={"task": package.task, "sources": package.sources, "document_context": [item.__dict__ for item in package.document_context], "allowed_source_ids": _candidate_ids(package)}, generation_instructions=instruction, mode=mode)
     return data, package
 
 

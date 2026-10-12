@@ -1260,13 +1260,42 @@ summary {
 .composer-box button {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  min-width: 100px;
+  min-height: 38px;
   flex: 0 0 auto;
-  padding: 0;
+  padding: 8px 12px;
   border-radius: 10px;
   background: var(--purple);
-  font-size: 18px;
+  font-size: 12px;
+}
+.reply-target {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+  padding: 10px 13px;
+  border-left: 3px solid var(--purple);
+  border-radius: 8px;
+  background: var(--purple-soft);
+  font-size: 12px;
+}
+.reply-target strong {
+  color: var(--purple-dark);
+}
+.reply-target span {
+  color: var(--muted-ink);
+}
+.generation-recovery {
+  max-width: 780px;
+  margin: 16px auto;
+  padding: 16px;
+  border: 1px solid #ded8ff;
+  border-radius: 12px;
+  background: var(--purple-soft);
+  font-size: 13px;
+}
+.generation-recovery p {
+  color: var(--muted-ink);
+  line-height: 1.5;
 }
 .bottom-composer > small {
   display: block;

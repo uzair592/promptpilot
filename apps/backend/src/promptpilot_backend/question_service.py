@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Literal
@@ -48,6 +49,33 @@ def next_question(
     provider: QuestionProvider | None = None,
     observer: ProviderObserver | None = None,
 ) -> Question | None:
+    if session.status != "active":
+        return None
+    analysis_id = session.latest_analysis_id or session.analysis_id
+    presented = db.scalar(
+        select(Question)
+        .join(InformationGap, InformationGap.id == Question.gap_id)
+        .where(
+            Question.session_id == session.id,
+            Question.status == "presented",
+            InformationGap.analysis_id == analysis_id,
+        )
+        .order_by(Question.created_at.desc())
+    )
+    if presented is not None:
+        return presented
+    # Reanalysis creates new gap IDs. Match the semantic target, not only its old ID,
+    # so an answered or explicitly skipped question cannot reappear after refresh.
+    addressed = set(
+        db.execute(
+            select(InformationGap.dimension, InformationGap.title)
+            .join(Question, Question.gap_id == InformationGap.id)
+            .where(
+                Question.session_id == session.id,
+                Question.status.in_(("answered", "skipped", "dismissed")),
+            )
+        ).all()
+    )
     existing_gap_ids = select(Question.gap_id).where(
         Question.session_id == session.id,
         Question.status.in_(("answered", "skipped", "dismissed", "obsolete")),
@@ -61,6 +89,7 @@ def next_question(
             )
         ).all()
     )
+    gaps = [gap for gap in gaps if (gap.dimension, gap.title) not in addressed]
     if not gaps:
         session.status = "completed"
         session.stop_reason = "no_unresolved_gaps"
@@ -184,6 +213,7 @@ def next_question(
         priority=generated.priority,
         status="presented",
         source=source,
+        options=json.dumps(generated.options) if generated.options else None,
     )
     db.add(question)
     db.commit()
@@ -231,11 +261,18 @@ def reanalyze_after_answer(db: Session, session: QuestionSession, answer: Answer
     if original is None:
         raise ValueError("Question source message is missing")
     memory = ProjectMemoryService().active(db, previous.project_id)
+    answers = db.execute(
+        select(Answer, Question, InformationGap)
+        .join(Question, Question.id == Answer.question_id)
+        .join(InformationGap, InformationGap.id == Question.gap_id)
+        .where(Question.session_id == session.id, Answer.source == "user")
+        .order_by(Answer.created_at)
+    ).all()
     input_value = AnalysisInput(
         original_prompt=original.content,
         task_category=previous.task_category,
         memory_items=tuple({"subject": item.subject, "content": item.content} for item in memory),
-        relevant_answers=tuple(item.content for item in memory if item.source == "user"),
+        relevant_answers=tuple(item.content for item, _, _ in answers),
     )
     analysis = analyze_input(
         db, previous.project_id, previous.conversation_id, input_value, original.id
@@ -244,6 +281,30 @@ def reanalyze_after_answer(db: Session, session: QuestionSession, answer: Answer
     answered_question = db.get(Question, answer.question_id)
     old_gap = db.get(InformationGap, answered_question.gap_id) if answered_question else None
     if old_gap:
-        old_gap.status = "partially_resolved"
+        old_gap.status = "resolved"
+    provided = {(gap.dimension, gap.title): item.content for item, _, gap in answers}
+    for gap in analysis.gaps:
+        if (gap.dimension, gap.title) in provided:
+            gap.status = "resolved"
+    # A reply such as "Three bullet points" supplies output information even when
+    # it does not contain a keyword the baseline analyzer recognizes.
+    evidence = {gap.dimension: item.content for item, _, gap in answers}
+    for dimension in analysis.dimensions:
+        if dimension.key in evidence:
+            dimension.evidence = evidence[dimension.key]
+            dimension.status = "present"
+            dimension.score = max(dimension.score or 0, 70)
+            dimension.explanation = "The user supplied this information in a clarification reply."
+    applicable = [
+        item.score for item in analysis.dimensions if item.applicable and item.score is not None
+    ]
+    analysis.overall_score = round(sum(applicable) / len(applicable)) if applicable else 0
+    analysis.status = (
+        "Good"
+        if analysis.overall_score >= 80
+        else "Medium"
+        if analysis.overall_score >= 50
+        else "Poor"
+    )
     db.commit()
     return analysis

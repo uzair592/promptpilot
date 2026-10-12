@@ -236,6 +236,7 @@ def analyze_input(
     db: Session, project_id: UUID, conversation_id: UUID, value: AnalysisInput, message_id: UUID
 ) -> PromptAnalysis:
     context = "\n".join(f"{item['subject']}: {item['content']}" for item in value.memory_items)
+    context = "\n".join((context, *value.relevant_answers))
     message = Message(
         id=message_id, conversation_id=conversation_id, role="user", content=value.original_prompt
     )

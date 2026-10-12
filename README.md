@@ -55,6 +55,15 @@ pnpm --filter @promptpilot/frontend dev
 
 Open `http://localhost:3000`, register or sign in, and use the default PromptPilot workspace. Enter a request in the bottom composer; analysis, recommendations, clarifications, and the improved prompt appear in the chat. Next.js proxies same-origin `/api/v1` requests to `BACKEND_ORIGIN` (defaulting to `http://localhost:8000` during development).
 
+When PromptPilot asks a question, select **Reply** to focus the bottom box. The
+box shows **Replying to PromptPilot** and the exact question; **Send answer**
+saves your reply to that question, not as a new prompt. A saved reply remains in
+the chat after refresh. If a request is not confirmed, your text stays in the
+box for a safe retry. If the model fails after saving, use **Retry generation**
+(or **Generate improved prompt** after refresh); you do not need to retype any
+saved answers. The extension similarly preserves its filled reply boxes after
+a provider failure.
+
 For OpenRouter-backed generation, set these variables in the terminal that will
 start the backend or launcher. Read the key without echoing it or placing it in
 a file:

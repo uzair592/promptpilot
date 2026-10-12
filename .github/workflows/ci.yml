@@ -66,6 +66,9 @@ jobs:
           docs/production-deployment.md render.yaml package.json
           pnpm-workspace.yaml playwright.config.ts tests/acceptance/run.mjs
           tests/acceptance/extension.e2e.ts
+          tests/acceptance/clarification-recovery.e2e.ts
+          tests/acceptance/fake-openai-provider.mjs
+          tests/local-startup/root-routing.e2e.ts
           apps/frontend/next.config.ts apps/frontend/lib/auth.ts
           apps/frontend/lib/conversations.ts apps/frontend/lib/projects.ts
           apps/frontend/lib/model-recommendations.ts

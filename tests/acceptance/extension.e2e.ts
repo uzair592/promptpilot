@@ -10,7 +10,10 @@ test("improves and replaces a prompt inside a ChatGPT-style composer", async ({
     Object.defineProperty(globalThis, "chrome", {
       value: {
         runtime: {
-          sendMessage: async () => {
+          sendMessage: async (message: {
+            type: string;
+            answers?: Array<{ question: string; answer: string }>;
+          }) => {
             requestNumber += 1;
             if (requestNumber === 1) {
               return {
@@ -27,6 +30,17 @@ test("improves and replaces a prompt inside a ChatGPT-style composer", async ({
                   improvedPrompt: "",
                   improvements: [],
                 },
+              };
+            }
+            if (requestNumber === 2)
+              return { ok: false, error: "Temporary provider error" };
+            if (
+              message.type !== "IMPROVE_PROMPT" ||
+              message.answers?.[0]?.answer !== "Beginner developers"
+            ) {
+              return {
+                ok: false,
+                error: "The clarification reply was not sent",
               };
             }
             return {
@@ -67,7 +81,17 @@ test("improves and replaces a prompt inside a ChatGPT-style composer", async ({
     .locator("textarea[data-index='0']")
     .fill("Beginner developers");
   await extension
-    .getByRole("button", { name: "Create improved prompt" })
+    .getByRole("button", { name: "Send answers & improve" })
+    .click();
+
+  await expect(extension.getByRole("alert")).toContainText(
+    "Your replies are preserved",
+  );
+  await expect(extension.locator("textarea[data-index='0']")).toHaveValue(
+    "Beginner developers",
+  );
+  await extension
+    .getByRole("button", { name: "Send answers & improve" })
     .click();
 
   await expect(extension.locator(".pp-result")).toContainText(
