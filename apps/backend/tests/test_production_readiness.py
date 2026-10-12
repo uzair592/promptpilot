@@ -15,9 +15,7 @@ from promptpilot_backend.models import AuthRateLimitCounter
 
 def production_environment(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv(
-        "DATABASE_URL", "postgres://promptpilot:secret@db.example.com/promptpilot"
-    )
+    monkeypatch.setenv("DATABASE_URL", "postgres://promptpilot:secret@db.example.com/promptpilot")
     monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
     monkeypatch.setenv("STORAGE_PATH", str(tmp_path / "persistent"))
     for variable in ("LLM_PROVIDER", "LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY"):
@@ -30,7 +28,10 @@ def test_production_settings_accept_postgres_and_optional_llm(monkeypatch, tmp_p
     settings = Settings.from_environment()
     settings.validate()
 
-    assert settings.database_url == "postgresql+psycopg://promptpilot:secret@db.example.com/promptpilot"
+    assert (
+        settings.database_url
+        == "postgresql+psycopg://promptpilot:secret@db.example.com/promptpilot"
+    )
     assert settings.secure_cookies
     assert settings.ensure_storage_directory().is_dir()
 
@@ -44,9 +45,7 @@ def test_production_settings_accept_postgres_and_optional_llm(monkeypatch, tmp_p
         ("llm_api_key", "partial"),
     ],
 )
-def test_production_settings_reject_unsafe_configuration(
-    monkeypatch, tmp_path, field, value
-):
+def test_production_settings_reject_unsafe_configuration(monkeypatch, tmp_path, field, value):
     production_environment(monkeypatch, tmp_path)
     settings = replace(Settings.from_environment(), **{field: value})
 
@@ -70,6 +69,13 @@ def test_database_url_normalizes_render_postgres_scheme():
         normalize_database_url("postgresql://user:password@db.example.com/app")
         == "postgresql+psycopg://user:password@db.example.com/app"
     )
+
+
+def test_provider_vault_key_must_be_a_fernet_key(monkeypatch):
+    monkeypatch.setenv("PROVIDER_KEY_ENCRYPTION_KEY", "not-a-fernet-key")
+
+    with pytest.raises(ConfigurationError, match="Fernet"):
+        Settings.from_environment().validate()
 
 
 def test_installed_application_finds_migrations_from_backend_working_directory(
@@ -125,8 +131,7 @@ def test_authentication_rate_limit_is_persisted_and_returns_retry_after(
 
     counter = db_session.scalar(
         select(AuthRateLimitCounter).where(
-            AuthRateLimitCounter.key
-            == sha256(b"rate-limited@example.com").hexdigest()
+            AuthRateLimitCounter.key == sha256(b"rate-limited@example.com").hexdigest()
         )
     )
     assert counter is not None

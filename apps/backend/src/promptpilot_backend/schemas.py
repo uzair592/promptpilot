@@ -491,3 +491,149 @@ class SingleRunEvaluationResponse(EvaluationResponse):
 
 class CompareResponsesRequest(CompareEvaluationRequest):
     pass
+
+
+class ProviderConnectionCreateRequest(BaseModel):
+    provider: str = Field(pattern="^(openai|anthropic|gemini|openrouter)$")
+    label: str = Field(min_length=1, max_length=80)
+    api_key: str = Field(min_length=8, max_length=1000)
+    default_model: str = Field(min_length=1, max_length=240)
+
+    @field_validator("label", "api_key", "default_model")
+    @classmethod
+    def provider_value_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Value must not be blank")
+        return value
+
+
+class ProviderConnectionResponse(BaseModel):
+    id: UUID
+    provider: str
+    label: str
+    masked_key: str
+    default_model: str
+    status: str
+    last_tested_at: datetime | None
+    last_test_status: str | None
+    last_test_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProviderConnectionListResponse(BaseModel):
+    items: list[ProviderConnectionResponse]
+
+
+class ProviderTestResponse(BaseModel):
+    connection: ProviderConnectionResponse
+    available_models: list[str]
+
+
+class ProjectPlanCreateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    idea: str = Field(min_length=10, max_length=20000)
+    start_at: datetime | None = None
+
+    @field_validator("title", "idea")
+    @classmethod
+    def plan_value_not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Value must not be blank")
+        return value
+
+
+class ProjectRepositoryRequest(BaseModel):
+    owner: str = Field(pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+    repo: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,100}$")
+    token: str = Field(min_length=8, max_length=1000)
+
+
+class ProjectRepositoryResponse(BaseModel):
+    owner: str
+    repo: str
+    default_branch: str
+    url: str
+
+
+class PublishTaskResponse(BaseModel):
+    pull_request_url: str
+    branch: str
+
+
+class AgentDraftUpdateRequest(BaseModel):
+    output_text: str = Field(min_length=1, max_length=1000000)
+
+
+class AgentTaskUpdateRequest(BaseModel):
+    assigned_connection_id: UUID | None = None
+    assigned_model: str | None = Field(default=None, max_length=240)
+    scheduled_for: datetime | None = None
+    status: str | None = Field(
+        default=None,
+        pattern="^(backlog|scheduled|ready|review|completed|cancelled)$",
+    )
+
+
+class AgentRunResponse(BaseModel):
+    id: UUID
+    task_id: UUID
+    provider: str
+    model: str
+    status: str
+    output_text: str | None
+    error_message: str | None
+    started_at: datetime
+    completed_at: datetime | None
+
+
+class AgentTaskResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    plan_id: UUID
+    milestone_id: UUID
+    title: str
+    description: str
+    role: str
+    assignment_reason: str
+    assigned_connection_id: UUID | None
+    assigned_provider: str | None
+    assigned_model: str | None
+    acceptance_criteria: list[str]
+    dependencies: list[str]
+    status: str
+    scheduled_for: datetime | None
+    output_text: str | None
+    pull_request_url: str | None
+    last_error: str | None
+    attempt_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class PlanMilestoneResponse(BaseModel):
+    id: UUID
+    plan_id: UUID
+    title: str
+    description: str
+    position: int
+    status: str
+    due_at: datetime | None
+    tasks: list[AgentTaskResponse]
+
+
+class ProjectPlanResponse(BaseModel):
+    id: UUID
+    project_id: UUID
+    title: str
+    summary: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    milestones: list[PlanMilestoneResponse]
+
+
+class ProjectPlanListResponse(BaseModel):
+    items: list[ProjectPlanResponse]

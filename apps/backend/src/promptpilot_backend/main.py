@@ -23,6 +23,7 @@ from .errors import error_response
 from .evaluation_routes import router as evaluation_router
 from .execution_routes import router as execution_router
 from .memory_routes import router as memory_router
+from .orchestration_routes import plan_router, provider_router
 from .project_routes import router as project_router
 from .prompt_routes import router as prompt_router
 from .question_routes import router as question_router
@@ -142,3 +143,5 @@ app.include_router(context_router)
 app.include_router(prompt_router)
 app.include_router(execution_router)
 app.include_router(evaluation_router)
+app.include_router(provider_router)
+app.include_router(plan_router)

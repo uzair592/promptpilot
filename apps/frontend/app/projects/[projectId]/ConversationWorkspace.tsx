@@ -455,6 +455,12 @@ export function ConversationWorkspace({
             <span>＋</span> Sources
             {documents.length > 0 && <b>{documents.length}</b>}
           </button>
+          <a
+            className="sidebar-tool-link"
+            href={`/projects/${projectId}/agents`}
+          >
+            <span>✦</span> AI delivery team
+          </a>
         </div>
         <div className="sidebar-section chat-history">
           <small>RECENT</small>
@@ -580,6 +586,7 @@ export function ConversationWorkspace({
 
               {currentPrompt && (
                 <PromptResult
+                  projectId={projectId}
                   prompt={currentPrompt}
                   copied={copied}
                   onCopy={async () => {
@@ -879,6 +886,7 @@ function QuestionMessage({
 }
 
 function PromptResult({
+  projectId,
   prompt,
   copied,
   onCopy,
@@ -886,6 +894,7 @@ function PromptResult({
   onExecute,
   busy,
 }: {
+  projectId: string;
   prompt: GeneratedPrompt;
   copied: boolean;
   onCopy: () => void;
@@ -908,6 +917,24 @@ function PromptResult({
           <small>Version {prompt.version_number}</small>
         </div>
         <div className="optimized-prompt">{prompt.optimized_prompt}</div>
+        <div className="delivery-choice">
+          <strong>What would you like to do next?</strong>
+          <p>
+            Use the prompt in an AI chat, or plan this project with your AI
+            team.
+          </p>
+          <a
+            href={`/projects/${projectId}/agents`}
+            onClick={() =>
+              sessionStorage.setItem(
+                `promptpilot:delivery-idea:${projectId}`,
+                prompt.optimized_prompt,
+              )
+            }
+          >
+            Plan and build this project →
+          </a>
+        </div>
         {prompt.quality_notes.length > 0 && (
           <div className="improvement-notes">
             {prompt.quality_notes.slice(0, 3).map((note) => (

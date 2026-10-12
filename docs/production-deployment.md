@@ -48,6 +48,13 @@ never commit credentials or put them in Vercel client-visible variables.
 and secure in production. Numeric upload, timeout, and redirect limits are
 validated at startup.
 
+`PROVIDER_KEY_ENCRYPTION_KEY` protects per-user OpenRouter, OpenAI, Anthropic,
+and Gemini credentials. Generate a Fernet key with the command in the root
+README and supply it when Render prompts for this unsynced Blueprint secret.
+Preserve the value across redeployments and disaster recovery; changing or
+losing it makes existing provider connections unreadable. Back it up separately
+from the database and never expose it to Vercel or client-side code.
+
 LLM configuration is optional for startup. If used, configure
 `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY` together in the
 backend's secret store. Do not configure a provider in CI or use frontend
@@ -61,8 +68,8 @@ environment variables for credentials.
 3. Deploy. Render runs `python -m alembic upgrade head` before starting the web
    service. The backend never creates production tables from ORM metadata.
 4. Verify `/healthz` and database-backed `/readyz`, then verify registration,
-   login/logout, project creation, and document persistence through the Vercel
-   origin.
+   login/logout, project creation, provider connection masking/testing, AI-team
+   plan creation, and document persistence through the Vercel origin.
 5. Back up PostgreSQL and the persistent disk independently. A document's
    parsed content is in PostgreSQL while original uploaded bytes are on disk.
 

@@ -7,6 +7,9 @@ from uuid import UUID
 
 os.environ["DATABASE_URL"] = "sqlite:///./test-promptpilot.db"
 os.environ["SESSION_COOKIE_NAME"] = "promptpilot_test_session"
+os.environ["PROVIDER_KEY_ENCRYPTION_KEY"] = (
+    "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+)
 
 import pytest
 from fastapi.testclient import TestClient

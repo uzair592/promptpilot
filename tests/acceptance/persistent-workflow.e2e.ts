@@ -202,6 +202,20 @@ test("registers, completes, and restores the persistent product workflow", async
   await expect(promptReady).toBeVisible();
   await expect(page.getByText(/Local deterministic response/)).toHaveCount(2);
 
+  const improvedIdea = await page.locator(".optimized-prompt").innerText();
+  await page.getByRole("link", { name: "Plan and build this project" }).click();
+  await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+\/agents$/);
+  await expect(
+    page.getByRole("heading", { name: "AI delivery team" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Product idea")).toHaveValue(improvedIdea);
+  await page
+    .getByRole("button", { name: "Create milestones and tasks" })
+    .click();
+  await expect(page.getByText("Discovery and architecture")).toBeVisible();
+  await expect(page.getByText("Define product requirements")).toBeVisible();
+  await expect(page.getByText("Design API contracts")).toBeVisible();
+
   const fakeProviderResponse = await page.request.get(
     "http://127.0.0.1:8132/health",
   );
