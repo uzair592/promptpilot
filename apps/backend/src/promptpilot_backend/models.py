@@ -375,6 +375,171 @@ class ModelRun(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
+class ProviderConnection(Base):
+    """A user-owned, encrypted credential for a supported model provider."""
+
+    __tablename__ = "provider_connections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", "label", name="uq_provider_connections_user_label"),
+        CheckConstraint(
+            "provider IN ('openai', 'anthropic', 'gemini', 'openrouter')",
+            name="ck_provider_connections_provider",
+        ),
+        CheckConstraint(
+            "status IN ('untested', 'active', 'invalid', 'disabled')",
+            name="ck_provider_connections_status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    encrypted_api_key: Mapped[str] = mapped_column(Text, nullable=False)
+    key_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_last_four: Mapped[str] = mapped_column(String(4), nullable=False)
+    default_model: Mapped[str] = mapped_column(String(240), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="untested", index=True)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_test_status: Mapped[str | None] = mapped_column(String(20))
+    last_test_message: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class ProjectPlan(Base):
+    __tablename__ = "project_plans"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active', 'completed', 'archived')",
+            name="ck_project_plans_status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class ProjectRepository(Base):
+    __tablename__ = "project_repositories"
+
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    owner: Mapped[str] = mapped_column(String(100), nullable=False)
+    repo: Mapped[str] = mapped_column(String(100), nullable=False)
+    default_branch: Mapped[str] = mapped_column(String(240), nullable=False)
+    encrypted_token: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class PlanMilestone(Base):
+    __tablename__ = "plan_milestones"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "position", name="uq_plan_milestones_position"),
+        CheckConstraint(
+            "status IN ('pending', 'active', 'completed')",
+            name="ck_plan_milestones_status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    plan_id: Mapped[UUID] = mapped_column(
+        ForeignKey("project_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AgentTask(Base):
+    __tablename__ = "agent_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('orchestrator', 'product_manager', 'researcher', 'frontend', 'backend', 'api', 'tester')",
+            name="ck_agent_tasks_role",
+        ),
+        CheckConstraint(
+            "status IN ('backlog', 'scheduled', 'ready', 'running', 'review', 'completed', 'failed', 'cancelled')",
+            name="ck_agent_tasks_status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    plan_id: Mapped[UUID] = mapped_column(
+        ForeignKey("project_plans.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    milestone_id: Mapped[UUID] = mapped_column(
+        ForeignKey("plan_milestones.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    assigned_connection_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_connections.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    assignment_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    assigned_model: Mapped[str | None] = mapped_column(String(240))
+    acceptance_criteria_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    dependencies_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="backlog", index=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    output_text: Mapped[str | None] = mapped_column(Text)
+    pull_request_url: Mapped[str | None] = mapped_column(String(500))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'failed')", name="ck_agent_runs_status"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    connection_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_connections.id", ondelete="SET NULL"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    model: Mapped[str] = mapped_column(String(240), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    output_text: Mapped[str | None] = mapped_column(Text)
+    usage_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    error_message: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Evaluation(Base):
     """A persisted evaluation of one response or a baseline/prompt comparison."""
 

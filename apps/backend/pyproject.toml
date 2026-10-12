@@ -21,6 +21,7 @@ dependencies = [
   "python-docx>=1.1,<2",
   "openpyxl>=3.1,<4",
   "beautifulsoup4>=4.12,<5",
+  "cryptography>=43,<47",
   "psycopg[binary]>=3.2,<4",
 ]
 
@@ -70,6 +71,7 @@ ignore = ["B008"]
 "src/promptpilot_backend/prompt_routes.py" = ["E501"]
 "src/promptpilot_backend/execution_service.py" = ["E501"]
 "src/promptpilot_backend/execution_routes.py" = ["E501"]
+"src/promptpilot_backend/orchestration_service.py" = ["E501"]
 "migrations/versions/*.py" = ["E501"]
 
 [tool.mypy]

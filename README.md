@@ -82,7 +82,48 @@ Remove-Variable secret, pointer
 The one-command launcher inherits these variables. Provider credentials remain
 backend-only; do not prefix them with `NEXT_PUBLIC_`.
 
-Analysis and clarification have deterministic offline paths. Prompt generation and target-model execution require server-side provider configuration (`LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`). When unavailable, the UI reports that state and does not manufacture a model response. Credentials are never entered in the browser. Heuristic evaluation can compare compatible persisted runs without a judge provider; an LLM-judge method requires its configured provider.
+Analysis and clarification have deterministic offline paths. Prompt generation and target-model execution require server-side provider configuration (`LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`). When unavailable, the UI reports that state and does not manufacture a model response. Heuristic evaluation can compare compatible persisted runs without a judge provider; an LLM-judge method requires its configured provider.
+
+## Multi-model AI delivery team
+
+Open a project and select **AI delivery team** in the sidebar. A project owner or
+editor can connect OpenRouter, OpenAI, Anthropic, or Google Gemini, then turn a
+product idea into ordered discovery, backend, frontend, testing, and release
+milestones. PromptPilot recommends an available provider for each role, allows a
+human to change the assignment, and runs a task only after **Run now** is
+selected. The product manager, API, frontend, backend, and tester roles receive
+the project goal and saved prerequisite handoffs. Frontend and backend can run
+together after their prerequisites; **Run ready tasks** starts independent
+model requests concurrently, and testing waits for both results. OpenRouter's `openrouter/free`
+router is the default free starting
+model; availability and rate limits are controlled by OpenRouter.
+
+Provider keys are submitted over the same-origin authenticated API, encrypted
+before database storage, masked in every response, and never sent back to the
+browser. Set a stable `PROVIDER_KEY_ENCRYPTION_KEY` before saving connections:
+
+```powershell
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+$env:PROVIDER_KEY_ENCRYPTION_KEY = "<generated value>"
+```
+
+Keep this key outside Git. Losing or changing it makes existing saved provider
+connections and GitHub tokens unreadable. The generated prompt has a **Plan and
+build this project** link that transfers its text into the AI team's plan form.
+To connect GitHub, create a fine-grained GitHub token restricted to the chosen
+repository with **Contents** and **Pull requests** write access. The project
+owner enters `owner/repo` and the token in the AI team's GitHub form. The token
+is encrypted on the backend and never returned to the browser. A code specialist
+produces a JSON `files` draft. Review it, then select **Publish reviewed code to
+GitHub** to create a task branch and draft pull request. The app fetches a
+bounded source snapshot from the default branch; unmerged task outputs are
+passed to downstream specialists through saved handoffs.
+
+Scheduled times are durable planning records; no unattended worker is enabled.
+The app does not run generated code, merge PRs, or deploy. Review every draft
+and run tests before merging. A separate server-wide `LLM_*` configuration is
+still needed for the original prompt-improvement chat; user-connected keys are
+used by the AI delivery tasks.
 
 ## Verification
 

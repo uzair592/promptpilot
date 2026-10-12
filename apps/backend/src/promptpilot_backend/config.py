@@ -1,5 +1,7 @@
 import os
 import tempfile
+from base64 import urlsafe_b64decode
+from binascii import Error as Base64Error
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -23,6 +25,7 @@ class Settings:
     llm_model: str
     llm_api_key: str
     llm_timeout: float
+    provider_key_encryption_key: str
     max_upload_bytes: int
     storage_path: str
     url_connect_timeout: float
@@ -51,13 +54,12 @@ class Settings:
             llm_model=os.getenv("LLM_MODEL", "").strip(),
             llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
             llm_timeout=float(os.getenv("LLM_TIMEOUT", "30")),
+            provider_key_encryption_key=os.getenv("PROVIDER_KEY_ENCRYPTION_KEY", "").strip(),
             max_upload_bytes=int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))),
             storage_path=os.getenv("STORAGE_PATH", "./storage"),
             url_connect_timeout=float(os.getenv("URL_CONNECT_TIMEOUT", "5")),
             url_read_timeout=float(os.getenv("URL_READ_TIMEOUT", "15")),
-            url_max_response_bytes=int(
-                os.getenv("URL_MAX_RESPONSE_BYTES", str(5 * 1024 * 1024))
-            ),
+            url_max_response_bytes=int(os.getenv("URL_MAX_RESPONSE_BYTES", str(5 * 1024 * 1024))),
             url_max_redirects=int(os.getenv("URL_MAX_REDIRECTS", "3")),
         )
 
@@ -68,6 +70,13 @@ class Settings:
             raise ConfigurationError("SESSION_TTL_SECONDS must be positive")
         if self.llm_timeout <= 0:
             raise ConfigurationError("LLM_TIMEOUT must be positive")
+        if self.provider_key_encryption_key:
+            try:
+                decoded_provider_key = urlsafe_b64decode(self.provider_key_encryption_key)
+            except (Base64Error, ValueError):
+                decoded_provider_key = b""
+            if len(decoded_provider_key) != 32:
+                raise ConfigurationError("PROVIDER_KEY_ENCRYPTION_KEY must be a valid Fernet key")
         if self.max_upload_bytes <= 0 or self.url_max_response_bytes <= 0:
             raise ConfigurationError("Upload and URL response limits must be positive")
         if self.url_connect_timeout <= 0 or self.url_read_timeout <= 0:
@@ -108,9 +117,7 @@ class Settings:
             or not database.hostname
             or not database.path.strip("/")
         ):
-            raise ConfigurationError(
-                "Production DATABASE_URL must identify a PostgreSQL database"
-            )
+            raise ConfigurationError("Production DATABASE_URL must identify a PostgreSQL database")
         if not self.cors_origins or any(
             not _is_https_origin(origin) for origin in self.cors_origins
         ):

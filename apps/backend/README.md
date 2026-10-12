@@ -16,6 +16,15 @@ The default development database is SQLite when `DATABASE_URL` is omitted. Produ
 
 Production settings validate the PostgreSQL URL, HTTPS CORS origins, absolute persistent storage, request limits, and all-or-none LLM configuration. LLM credentials are optional for startup. `/healthz` is a process check; `/readyz` verifies database connectivity. Registration and login share database-backed throttling: 20 attempts per normalized account identity per 15-minute window.
 
+The multi-model provider vault supports OpenRouter, OpenAI, Anthropic, and Google
+Gemini through fixed official API origins. Set `PROVIDER_KEY_ENCRYPTION_KEY` to a
+stable Fernet key before accepting provider connections. Keys are encrypted at
+rest, are scoped to the authenticated user, and are never included in API
+responses. Connection tests list models without invoking paid generation. Agent
+task generation is an explicit user action; each run records provider, model,
+status, output, and usage metadata. Scheduled task timestamps are persisted for
+a future durable worker and are not executed automatically by the web process.
+
 For Vercel/Render configuration, migration ordering, backups, and safe rollback guidance, see [the production deployment guide](../../docs/production-deployment.md).
 
 ## Guarded benchmark pricing
