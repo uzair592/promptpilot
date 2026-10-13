@@ -41,9 +41,14 @@ import {
 } from "../../../lib/conversations";
 import {
   assessPromptQuality,
+  isSmallTalk,
   PromptQuality,
 } from "../../../lib/prompt-quality";
 import { recommendModels } from "../../../lib/model-recommendations";
+import {
+  getProviderConnections,
+  ProviderConnection,
+} from "../../../lib/orchestration";
 
 type ToolView = "quality" | "sources";
 
@@ -77,6 +82,10 @@ export function ConversationWorkspace({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [connections, setConnections] = useState<ProviderConnection[]>([]);
+  const [connectionId, setConnectionId] = useState("");
+  const [introNotice, setIntroNotice] = useState("");
+  const connectionRef = useRef<string | undefined>(undefined);
   const submissionKey = useRef<string | null>(null);
   const chatEnd = useRef<HTMLDivElement | null>(null);
   const replyBox = useRef<HTMLTextAreaElement | null>(null);
@@ -108,6 +117,25 @@ export function ConversationWorkspace({
       ),
     [draft, questions?.next_question, source, replyContext],
   );
+  const displayedAnalysis =
+    draft.trim() && !questions?.next_question ? null : analysis;
+  const displayedScore = displayedAnalysis?.overall_score ?? liveQuality.score;
+
+  useEffect(() => {
+    getProviderConnections()
+      .then((items) => {
+        setConnections(items.filter((item) => item.status === "active"));
+        const stored = localStorage.getItem("promptpilot:chat-provider");
+        if (
+          stored &&
+          items.some((item) => item.id === stored && item.status === "active")
+        ) {
+          setConnectionId(stored);
+          connectionRef.current = stored;
+        }
+      })
+      .catch(() => undefined);
+  }, []);
 
   const loadDocuments = useCallback(async () => {
     setDocuments(await getDocuments(projectId));
@@ -147,6 +175,7 @@ export function ConversationWorkspace({
               savedQuestions = await getNextQuestion(
                 conversation.id,
                 latestSource.id,
+                connectionRef.current,
               );
             } catch (questionError) {
               if (!(
@@ -304,6 +333,7 @@ export function ConversationWorkspace({
       conversationId,
       messageId,
       "structured",
+      connectionRef.current,
     );
     setPrompts((items) => [
       prompt,
@@ -326,9 +356,17 @@ export function ConversationWorkspace({
   }
 
   async function analyzeAndContinue(conversationId: string, messageId: string) {
-    const result = await analyzeMessage(conversationId, messageId);
+    const result = await analyzeMessage(
+      conversationId,
+      messageId,
+      connectionRef.current,
+    );
     setAnalysis(result);
-    const session = await getNextQuestion(conversationId, messageId);
+    const session = await getNextQuestion(
+      conversationId,
+      messageId,
+      connectionRef.current,
+    );
     setQuestions(session);
     if (!session.next_question)
       await generateAfterSaving(conversationId, messageId);
@@ -342,6 +380,13 @@ export function ConversationWorkspace({
       await submitClarification(draft);
       return;
     }
+    if (isSmallTalk(draft)) {
+      setIntroNotice(
+        "Tell me what you want to create, understand, or fix. A greeting or reaction has no task to improve yet.",
+      );
+      return;
+    }
+    setIntroNotice("");
 
     await act(
       "improve",
@@ -398,6 +443,7 @@ export function ConversationWorkspace({
           selected.id,
           questions.next_question!.id,
           content.trim(),
+          connectionRef.current,
         );
         const receipt = result.answered_questions.find(
           (answer) =>
@@ -424,6 +470,7 @@ export function ConversationWorkspace({
         const result = await skipQuestion(
           selected.id,
           questions.next_question!.id,
+          connectionRef.current,
         );
         setDraft("");
         setQuestions(result);
@@ -463,6 +510,7 @@ export function ConversationWorkspace({
             currentPrompt.version_id,
             source.id,
             strategy,
+            connectionRef.current,
           );
           setRuns((items) => [
             run,
@@ -633,12 +681,30 @@ export function ConversationWorkspace({
           </div>
           <div
             className="header-score"
-            aria-label={`Prompt quality ${liveQuality.score} out of 100`}
+            aria-label={`Prompt quality ${displayedScore} out of 100`}
           >
-            <QualityRing
-              score={analysis?.overall_score ?? liveQuality.score}
-              compact
-            />
+            <select
+              className="chat-model-select"
+              aria-label="Chat model"
+              value={connectionId}
+              disabled={Boolean(busy)}
+              onChange={(event) => {
+                setConnectionId(event.target.value);
+                connectionRef.current = event.target.value || undefined;
+                localStorage.setItem(
+                  "promptpilot:chat-provider",
+                  event.target.value,
+                );
+              }}
+            >
+              <option value="">Auto · connected model</option>
+              {connections.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label} · {item.default_model}
+                </option>
+              ))}
+            </select>
+            <QualityRing score={displayedScore} compact />
             <span>Quality</span>
           </div>
         </header>
@@ -743,12 +809,15 @@ export function ConversationWorkspace({
                   <section className="generation-recovery" role="status">
                     <strong>
                       {busy === "generate"
-                        ? "Sending your saved answers to the model…"
-                        : "Your prompt and replies are saved"}
+                        ? "Generating your improved prompt…"
+                        : error
+                          ? "Generation needs attention"
+                          : "Ready to improve this prompt"}
                     </strong>
                     <p>
-                      The improved prompt will use the saved clarification
-                      answers. You do not need to type them again.
+                      {busy === "generate"
+                        ? "Using your prompt and saved answers."
+                        : "Your answers are saved. Check the error below or choose another connected model before retrying."}
                     </p>
                     <button
                       type="button"
@@ -773,6 +842,11 @@ export function ConversationWorkspace({
             <div className="chat-error" role="alert">
               <strong>Something needs attention</strong>
               <span>{error}</span>
+            </div>
+          )}
+          {introNotice && (
+            <div className="chat-intro-notice" role="status">
+              {introNotice}
             </div>
           )}
           <div ref={chatEnd} />
@@ -850,7 +924,7 @@ export function ConversationWorkspace({
 
       <aside className="insight-panel">
         {toolView === "quality" ? (
-          <QualityPanel quality={liveQuality} analysis={analysis} />
+          <QualityPanel quality={liveQuality} analysis={displayedAnalysis} />
         ) : (
           <SourcesPanel
             projectId={projectId}

@@ -9,8 +9,10 @@ from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
 from .execution_service import LLMExecutionService, load_execution_targets
+from .llm_provider import ProviderError
 from .models import ModelRun, User
 from .project_policy import ProjectRole
+from .provider_selection import chat_provider
 from .schemas import ExecutePromptRequest, ModelRunResponse
 
 router = APIRouter(prefix="/api/v1/conversations/{conversation_id}/prompts", tags=["execution"])
@@ -52,9 +54,11 @@ def execute_prompt(
             payload.message_id,
             payload.strategy,
         )
-        run, _ = LLMExecutionService().execute(
+        run, _ = LLMExecutionService(chat_provider(db, user.id, payload.connection_id)).execute(
             db, version, message, payload.system_instruction, payload.parameters, payload.strategy
         )
+    except ProviderError as error:
+        raise HTTPException(status_code=503, detail=error.reason) from None
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
     except Exception:

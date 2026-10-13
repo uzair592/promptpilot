@@ -38,7 +38,7 @@ test("saves replies, restores pending questions, and retries generation with the
   await page.getByRole("button", { name: "Reply", exact: true }).click();
   await expect(answerBox).toBeFocused();
   await expect(page.locator(".reply-target")).toContainText(pending.text);
-  await answerBox.fill("Three bullet points");
+  await answerBox.fill("A neighbourhood book club for adult beginners");
   let loseFirstAcknowledgement = true;
   await page.route("**/questions/*/answers", async (route) => {
     if (loseFirstAcknowledgement) {
@@ -52,10 +52,12 @@ test("saves replies, restores pending questions, and retries generation with the
   });
   await page.getByRole("button", { name: "Send answer" }).click();
   await expect(errorNotice).toContainText("Your reply was not confirmed");
-  await expect(answerBox).toHaveValue("Three bullet points");
+  await expect(answerBox).toHaveValue(
+    "A neighbourhood book club for adult beginners",
+  );
   await page.getByRole("button", { name: "Send answer" }).click();
   await expect(page.locator(".clarification-answer p")).toHaveText([
-    "Three bullet points",
+    "A neighbourhood book club for adult beginners",
   ]);
   await expect(answerBox).toHaveValue("");
   await expect(page.locator(".reply-target")).not.toContainText(pending.text);
@@ -80,12 +82,12 @@ test("saves replies, restores pending questions, and retries generation with the
     page.getByRole("button", { name: "Retry generation" }),
   ).toBeEnabled();
   await expect(page.locator(".clarification-answer p")).toHaveText([
-    "Three bullet points",
+    "A neighbourhood book club for adult beginners",
     "Keep it informal and short",
   ]);
   await page.reload();
   await expect(page.locator(".clarification-answer p")).toHaveText([
-    "Three bullet points",
+    "A neighbourhood book club for adult beginners",
     "Keep it informal and short",
   ]);
   await page.getByRole("button", { name: "Generate improved prompt" }).click();
@@ -93,7 +95,7 @@ test("saves replies, restores pending questions, and retries generation with the
     page.getByRole("heading", { name: "Your prompt is ready" }),
   ).toBeVisible();
   await expect(page.locator(".optimized-prompt")).toContainText(
-    "Three bullet points",
+    "A neighbourhood book club for adult beginners",
   );
   await expect(page.locator(".optimized-prompt")).toContainText(
     "Keep it informal and short",
@@ -109,7 +111,7 @@ test("saves replies, restores pending questions, and retries generation with the
     input.relevant_answers.map((item: { content: string }) => item.content),
   ).toEqual(
     expect.arrayContaining([
-      "Three bullet points",
+      "A neighbourhood book club for adult beginners",
       "Keep it informal and short",
     ]),
   );

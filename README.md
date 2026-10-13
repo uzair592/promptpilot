@@ -86,14 +86,28 @@ Analysis and clarification have deterministic offline paths. Prompt generation a
 
 ## Multi-model AI delivery team
 
+The delivery team is a visual workflow editor: drag nodes, pan or zoom the canvas,
+select a node to edit its instructions and dependencies, and inspect its output
+and execution history. Independent nodes can run together. Outputs require review;
+approval, requests for changes, and review notes are saved with the task.
+Use **New workflow** to generate an idea-specific plan with a connected model or
+start with an editable template. **Add node** lets you extend the workflow.
+
+**Model Vault** loads its provider catalog from the backend. It supports OpenRouter,
+OpenAI, Anthropic, Gemini, xAI/Grok, DeepSeek, Mistral, Groq, and public HTTPS
+OpenAI-compatible APIs through the Custom option. **Load available models** queries
+your provider's current model catalog; you can also enter a model ID. Different
+nodes can use different models from the same connection. Saved connections also
+power the prompt-improvement chat through its **Chat model** selector.
+
 Open a project and select **AI delivery team** in the sidebar. A project owner or
 editor can connect OpenRouter, OpenAI, Anthropic, or Google Gemini, then turn a
 product idea into ordered discovery, backend, frontend, testing, and release
 milestones. PromptPilot recommends an available provider for each role, allows a
-human to change the assignment, and runs a task only after **Run now** is
+human to change the assignment, and runs a task only after **Run node** is
 selected. The product manager, API, frontend, backend, and tester roles receive
 the project goal and saved prerequisite handoffs. Frontend and backend can run
-together after their prerequisites; **Run ready tasks** starts independent
+together after their prerequisites; **Run ready nodes** starts independent
 model requests concurrently, and testing waits for both results. OpenRouter's `openrouter/free`
 router is the default free starting
 model; availability and rate limits are controlled by OpenRouter.
@@ -126,9 +140,21 @@ passed to downstream specialists through saved handoffs.
 
 Scheduled times are durable planning records; no unattended worker is enabled.
 The app does not run generated code, merge PRs, or deploy. Review every draft
-and run tests before merging. A separate server-wide `LLM_*` configuration is
-still needed for the original prompt-improvement chat; user-connected keys are
-used by the AI delivery tasks.
+and run tests before merging. The chat automatically uses your most recently
+connected active model when no explicit connection is selected. Server-wide
+`LLM_*` configuration remains available as a fallback when no vault connection
+is active. Gemini and Anthropic use their native API formats. Transient provider
+failures receive bounded retries; invalid JSON gets one repair attempt. Invalid
+keys and missing models produce specific errors instead of an endless retry loop.
+
+The quality meter is a completeness estimate. It evaluates newly typed prompts
+independently of an earlier analysis. Greetings and reactions score zero and do
+not start model calls. Clarification questions target the current task, omit
+optional gaps, and stop after at most three questions. Current-message replies
+take priority over other memory in the generation context.
+
+Local startup upgrades existing SQLite provider/workflow tables automatically.
+Production deployments must apply `python -m alembic upgrade head` before startup.
 
 ## Verification
 

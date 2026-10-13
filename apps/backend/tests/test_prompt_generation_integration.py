@@ -57,7 +57,7 @@ def test_generation_api_connects_analysis_answers_memory_and_documents(client, m
 
     import promptpilot_backend.prompt_routes as routes
 
-    monkeypatch.setattr(routes, "PromptGenerator", lambda: __import__("promptpilot_backend.prompt_generation", fromlist=["PromptGenerator"]).PromptGenerator(Provider()))
+    monkeypatch.setattr(routes, "PromptGenerator", lambda *_: __import__("promptpilot_backend.prompt_generation", fromlist=["PromptGenerator"]).PromptGenerator(Provider()))
     response = client.post(f"/api/v1/conversations/{conversation_id}/prompts/generate", json={"message_id": message["id"], "mode": "detailed"})
     assert response.status_code == 200, response.text
     assert captured["payload"]["input"]["original_prompt"] == message["content"]

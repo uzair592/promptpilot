@@ -382,10 +382,6 @@ class ProviderConnection(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "provider", "label", name="uq_provider_connections_user_label"),
         CheckConstraint(
-            "provider IN ('openai', 'anthropic', 'gemini', 'openrouter')",
-            name="ck_provider_connections_provider",
-        ),
-        CheckConstraint(
             "status IN ('untested', 'active', 'invalid', 'disabled')",
             name="ck_provider_connections_status",
         ),
@@ -401,6 +397,8 @@ class ProviderConnection(Base):
     key_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     key_last_four: Mapped[str] = mapped_column(String(4), nullable=False)
     default_model: Mapped[str] = mapped_column(String(240), nullable=False)
+    base_url: Mapped[str | None] = mapped_column(String(500))
+    models_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="untested", index=True)
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_test_status: Mapped[str | None] = mapped_column(String(20))
@@ -427,6 +425,7 @@ class ProjectPlan(Base):
     created_by_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(160), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+    planning_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="template")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
@@ -501,6 +500,7 @@ class AgentTask(Base):
     role: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     assignment_reason: Mapped[str] = mapped_column(Text, nullable=False)
     assigned_model: Mapped[str | None] = mapped_column(String(240))
+    review_notes: Mapped[str | None] = mapped_column(Text)
     acceptance_criteria_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     dependencies_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="backlog", index=True)

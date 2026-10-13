@@ -18,6 +18,12 @@ export type PromptQuality = {
 const contains = (value: string, expressions: RegExp[]) =>
   expressions.some((expression) => expression.test(value));
 
+export function isSmallTalk(value: string): boolean {
+  return /^(hi|hello|hey|hi there|hello there|amazing|great|awesome|nice|ok|okay|thanks|thank you|good morning|good evening)$/i.test(
+    value.trim().replace(/[.!?]+$/, ""),
+  );
+}
+
 export function assessPromptQuality(rawPrompt: string): PromptQuality {
   const prompt = rawPrompt.trim();
   const words = prompt ? prompt.split(/\s+/).length : 0;
@@ -99,6 +105,12 @@ export function assessPromptQuality(rawPrompt: string): PromptQuality {
       suggestion: "Name the intended audience or preferred tone.",
     },
   ];
+  if (isSmallTalk(prompt)) {
+    for (const criterion of criteria) {
+      criterion.score = 0;
+      criterion.present = false;
+    }
+  }
   const score = Math.min(
     100,
     criteria.reduce((total, criterion) => total + criterion.score, 0),

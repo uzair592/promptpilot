@@ -203,6 +203,15 @@ test("registers, completes, and restores the persistent product workflow", async
   await expect(page.getByText(/Local deterministic response/)).toHaveCount(2);
 
   const improvedIdea = await page.locator(".optimized-prompt").innerText();
+  await page
+    .getByRole("textbox", { name: "Prompt to improve" })
+    .fill("amazing");
+  await expect(page.locator(".large-quality")).toContainText("0/100");
+  await expect(page.locator(".header-score")).toHaveAttribute(
+    "aria-label",
+    "Prompt quality 0 out of 100",
+  );
+  await page.getByRole("textbox", { name: "Prompt to improve" }).fill("");
   await page.getByRole("link", { name: "Plan and build this project" }).click();
   await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+\/agents$/);
   await expect(

@@ -1,7 +1,15 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class RegisterRequest(BaseModel):
@@ -234,6 +242,7 @@ class QuestionResponse(BaseModel):
 
 
 class AnswerCreateRequest(BaseModel):
+    connection_id: UUID | None = None
     content: str = Field(min_length=1, max_length=10000)
 
 
@@ -321,6 +330,7 @@ class QuestionSessionResponse(BaseModel):
 
 
 class PromptGenerateRequest(BaseModel):
+    connection_id: UUID | None = None
     message_id: UUID
     mode: str = Field(default="structured", pattern="^(structured|minimal|detailed)$")
     regeneration_instruction: str = Field(default="", max_length=4000)
@@ -344,6 +354,7 @@ class PromptGenerationResponse(BaseModel):
 
 
 class ExecutePromptRequest(BaseModel):
+    connection_id: UUID | None = None
     strategy: str = Field(pattern="^(baseline|promptpilot)$")
     message_id: UUID | None = None
     system_instruction: str | None = Field(default=None, max_length=10000)
@@ -494,10 +505,18 @@ class CompareResponsesRequest(CompareEvaluationRequest):
 
 
 class ProviderConnectionCreateRequest(BaseModel):
-    provider: str = Field(pattern="^(openai|anthropic|gemini|openrouter)$")
+    provider: str = Field(min_length=1, max_length=50)
     label: str = Field(min_length=1, max_length=80)
     api_key: str = Field(min_length=8, max_length=1000)
     default_model: str = Field(min_length=1, max_length=240)
+    base_url: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_provider_endpoint(self) -> "ProviderConnectionCreateRequest":
+        from .provider_registry import provider_definition
+
+        provider_definition(self.provider, self.base_url)
+        return self
 
     @field_validator("label", "api_key", "default_model")
     @classmethod
@@ -514,6 +533,8 @@ class ProviderConnectionResponse(BaseModel):
     label: str
     masked_key: str
     default_model: str
+    base_url: str | None = None
+    available_models: list[str] = Field(default_factory=list)
     status: str
     last_tested_at: datetime | None
     last_test_status: str | None
@@ -531,10 +552,21 @@ class ProviderTestResponse(BaseModel):
     available_models: list[str]
 
 
+class ProviderConnectionUpdateRequest(BaseModel):
+    default_model: str = Field(min_length=1, max_length=240)
+
+
+class ProviderDiscoveryRequest(BaseModel):
+    provider: str
+    api_key: str = Field(min_length=8, max_length=1000)
+    base_url: str | None = None
+
+
 class ProjectPlanCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     idea: str = Field(min_length=10, max_length=20000)
     start_at: datetime | None = None
+    planner_connection_id: UUID | None = None
 
     @field_validator("title", "idea")
     @classmethod
@@ -568,6 +600,11 @@ class AgentDraftUpdateRequest(BaseModel):
 
 
 class AgentTaskUpdateRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, min_length=1, max_length=20000)
+    dependencies: list[UUID] | None = Field(default=None, max_length=30)
+    acceptance_criteria: list[str] | None = Field(default=None, max_length=20)
+    review_notes: str | None = Field(default=None, max_length=10000)
     assigned_connection_id: UUID | None = None
     assigned_model: str | None = Field(default=None, max_length=240)
     scheduled_for: datetime | None = None
@@ -601,6 +638,7 @@ class AgentTaskResponse(BaseModel):
     assigned_connection_id: UUID | None
     assigned_provider: str | None
     assigned_model: str | None
+    review_notes: str | None = None
     acceptance_criteria: list[str]
     dependencies: list[str]
     status: str
@@ -625,6 +663,7 @@ class PlanMilestoneResponse(BaseModel):
 
 
 class ProjectPlanResponse(BaseModel):
+    planning_mode: str = "template"
     id: UUID
     project_id: UUID
     title: str

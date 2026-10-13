@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 from .conversation_routes import conversation_access
 from .db import get_db
 from .dependencies import current_user
+from .llm_provider import ProviderError
 from .models import Message, PromptAnalysis, PromptVersion, User
 from .project_policy import ProjectRole
 from .prompt_generation import PromptGenerator, build_generation_input, persist_generation
+from .provider_selection import chat_provider
 from .schemas import PromptGenerateRequest, PromptGenerationResponse
 
 router = APIRouter(prefix="/api/v1/conversations/{conversation_id}/prompts", tags=["prompts"])
@@ -79,7 +81,10 @@ def generate_prompt(
         input_data, package = build_generation_input(
             db, message, analysis, payload.mode, payload.regeneration_instruction
         )
-        outcome = PromptGenerator().generate(input_data)
+        provider = chat_provider(db, user.id, payload.connection_id)
+        outcome = PromptGenerator(provider).generate(input_data)
+    except ProviderError as error:
+        raise HTTPException(status_code=503, detail=error.reason) from None
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
     except Exception:

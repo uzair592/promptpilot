@@ -77,6 +77,11 @@ jobs:
           apps/frontend/app/register/page.tsx
           "apps/frontend/app/projects/[projectId]/page.tsx"
           "apps/frontend/app/projects/[projectId]/ConversationWorkspace.tsx"
+          "apps/frontend/app/projects/[projectId]/agents"
+          apps/frontend/lib/orchestration.ts apps/frontend/lib/workflow-layout.ts
+          apps/frontend/lib/prompt-quality.ts
+          tests/frontend-workflow-layout.test.ts tests/frontend-prompt-quality.test.ts
+          tests/acceptance/visual-workflow.e2e.ts
           tests/frontend-auth.test.ts tests/frontend-conversations.test.ts
           tests/frontend-projects.test.ts tests/extension-quality.test.ts
           tests/extension-protocol.test.ts
@@ -233,11 +238,11 @@ jobs:
           PYTHON: python
         run: pnpm test:e2e
 
-      - name: Upload failure diagnostics
-        if: ${{ failure() && steps.acceptance.outcome == 'failure' }}
+      - name: Upload browser screenshots and diagnostics
+        if: ${{ always() && steps.acceptance.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-failure-diagnostics
+          name: playwright-diagnostics
           path: |
             test-results/
             playwright-report/

@@ -10,6 +10,7 @@ from .dependencies import current_user
 from .memory_service import ProjectMemoryService
 from .models import Answer, Message, PromptAnalysis, Question, QuestionSession, User
 from .project_policy import ProjectRole
+from .provider_selection import chat_provider
 from .question_service import (
     answer_question,
     next_question,
@@ -79,11 +80,12 @@ def authorized_session(
 def get_next(
     conversation_id: UUID,
     message_id: UUID | None = None,
+    connection_id: UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> QuestionSessionResponse:
     session = authorized_session(db, conversation_id, user, message_id=message_id)
-    question = next_question(db, session)
+    question = next_question(db, session, provider=chat_provider(db, user.id, connection_id))
     return QuestionSessionResponse(
         id=session.id,
         status=session.status,
@@ -132,7 +134,7 @@ def submit_answer(
             db, session.project_id, question.text, answer.content
         )
         analysis = reanalyze_after_answer(db, session, answer)
-    question = next_question(db, session)
+    question = next_question(db, session, provider=chat_provider(db, user.id, payload.connection_id))
     return QuestionSessionResponse(
         id=session.id,
         status=session.status,
@@ -151,6 +153,7 @@ def submit_answer(
 def skip_question(
     conversation_id: UUID,
     question_id: UUID,
+    connection_id: UUID | None = None,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> QuestionSessionResponse:
@@ -162,7 +165,8 @@ def skip_question(
     )
     if question is None or question.status != "presented":
         raise HTTPException(status_code=404, detail="Question not found or no longer skippable")
-    next_item = skip_and_next_question(db, session, question)
+    next_item = skip_and_next_question(db, session, question,
+                                      provider=chat_provider(db, user.id, connection_id))
     return QuestionSessionResponse(
         id=session.id,
         status=session.status,
