@@ -92,7 +92,10 @@ def test_chat_title_from_first_prompt_and_delete_cascades(client):
         f"/api/v1/conversations/{conversation_id}/messages",
         json={"role": "user", "content": "Add inventory"},
     )
-    assert client.get(f"/api/v1/conversations/{conversation_id}").json()["title"] == "Restaurant POS plan"
+    assert (
+        client.get(f"/api/v1/conversations/{conversation_id}").json()["title"]
+        == "Restaurant POS plan"
+    )
     response = client.delete(f"/api/v1/conversations/{conversation_id}")
     assert response.status_code == 204
     assert client.get(f"/api/v1/conversations/{conversation_id}").status_code == 404
