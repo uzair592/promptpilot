@@ -1,6 +1,4 @@
 import json
-from uuid import uuid4
-
 from promptpilot_backend.execution_service import LLMExecutionService
 from promptpilot_backend.models import Conversation, Message, Project, PromptVersion, User
 
@@ -19,10 +17,11 @@ class Provider:
 
 def test_baseline_and_promptpilot_execute_exact_prompt(db_session):
     user = User(email="execute@example.com", normalized_email="execute@example.com", display_name="Execute", password_hash="hash")
-    project = Project(owner_id=uuid4(), name="Execution")
-    db_session.add_all([user, project])
+    db_session.add(user)
     db_session.flush()
-    project.owner_id = user.id
+    project = Project(owner_id=user.id, name="Execution")
+    db_session.add(project)
+    db_session.flush()
     conversation = Conversation(project_id=project.id, title="Run")
     db_session.add(conversation)
     db_session.flush()
