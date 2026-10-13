@@ -1962,3 +1962,151 @@ summary {
   font-weight: 700;
   text-decoration: underline;
 }
+
+/* Conversation navigation and a quieter writing surface. */
+.pilot-shell {
+  --ink: #24262e;
+  --muted-ink: #707481;
+  --line: #e7e8ec;
+  --purple: #6051d8;
+  grid-template-columns: 264px minmax(400px, 1fr) 300px;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+.pilot-sidebar {
+  padding: 22px 14px 18px;
+  background: #171922;
+}
+.pilot-brand {
+  padding-bottom: 25px;
+}
+.new-chat-button {
+  background: #292c39;
+  border-color: #454958;
+  border-radius: 12px;
+}
+.sidebar-section button,
+.sidebar-tool-link {
+  border-radius: 10px;
+}
+.chat-history-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: 10px;
+}
+.chat-history-row:hover,
+.chat-history-row.chat-active {
+  background: #292b36;
+}
+.chat-history-row .chat-history-title {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.chat-history-actions {
+  display: flex;
+  gap: 1px;
+  padding-right: 4px;
+  opacity: 0;
+}
+.chat-history-row:hover .chat-history-actions,
+.chat-history-row:focus-within .chat-history-actions {
+  opacity: 1;
+}
+.chat-history-actions button {
+  width: 27px;
+  padding: 5px;
+  justify-content: center;
+}
+.chat-history-actions button:hover {
+  color: #fff;
+  background: #494b58;
+}
+.chat-history-row form {
+  display: flex;
+  width: 100%;
+  gap: 3px;
+  padding: 4px;
+}
+.chat-history-row input {
+  min-width: 0;
+  flex: 1;
+  padding: 6px;
+  color: #fff;
+  background: #292b36;
+  border: 1px solid #7771ad;
+  border-radius: 7px;
+}
+.pilot-chat {
+  background: #fcfcfd;
+}
+.chat-header {
+  min-height: 68px;
+  padding: 0 30px;
+}
+.chat-scroll {
+  padding-top: 34px;
+}
+.chat-thread {
+  gap: 30px;
+}
+.from-user .message-body {
+  background: #efedf9;
+  border-radius: 18px 18px 4px 18px;
+}
+.assistant-card,
+.question-message,
+.prompt-result,
+.run-message {
+  border-radius: 18px;
+  box-shadow: 0 5px 18px rgb(31 32 49 / 4%);
+}
+.mobile-navigation,
+.sidebar-scrim {
+  display: none;
+}
+@media (max-width: 1080px) {
+  .pilot-shell {
+    grid-template-columns: 240px minmax(400px, 1fr);
+  }
+}
+@media (max-width: 760px) {
+  .pilot-shell {
+    display: block;
+  }
+  .pilot-sidebar.sidebar-open {
+    display: flex;
+    position: fixed;
+    z-index: 50;
+    inset: 0 auto 0 0;
+    width: min(84vw, 300px);
+  }
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    z-index: 49;
+    inset: 0;
+    background: rgb(13 15 28 / 55%);
+  }
+  .mobile-navigation {
+    display: block;
+    flex: 0 0 auto;
+    padding: 7px;
+    color: #3b3c46;
+    background: transparent;
+    font-size: 20px;
+  }
+  .chat-header {
+    gap: 12px;
+    padding: 0 16px;
+  }
+  .chat-history-actions {
+    opacity: 1;
+  }
+}

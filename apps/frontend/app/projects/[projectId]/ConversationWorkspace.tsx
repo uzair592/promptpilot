@@ -22,16 +22,19 @@ import {
   analyzeMessage,
   answerQuestion,
   createConversation,
+  deleteConversation,
   executePrompt,
   friendlyError,
   generatePrompt,
   getConversations,
+  getConversation,
   getDocuments,
   getGeneratedPrompts,
   getLatestAnalysis,
   getMessages,
   getNextQuestion,
   getRuns,
+  renameConversation,
   sendMessage,
   skipQuestion,
   uploadDocument,
@@ -71,6 +74,9 @@ export function ConversationWorkspace({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const submissionKey = useRef<string | null>(null);
   const chatEnd = useRef<HTMLDivElement | null>(null);
   const replyBox = useRef<HTMLTextAreaElement | null>(null);
@@ -231,7 +237,7 @@ export function ConversationWorkspace({
     await act(
       "new-chat",
       async () => {
-        const item = await createConversation(projectId, "New prompt");
+        const item = await createConversation(projectId, "Untitled chat");
         setConversations((items) => [item, ...items]);
         setSelected(item);
         setMessages([]);
@@ -243,6 +249,53 @@ export function ConversationWorkspace({
         submissionKey.current = null;
       },
       "A new chat could not be created.",
+    );
+  }
+
+  async function saveTitle(id: string) {
+    if (!editTitle.trim()) return;
+    await act(
+      "rename-chat",
+      async () => {
+        const updated = await renameConversation(id, editTitle.trim());
+        setConversations((items) =>
+          items.map((item) => (item.id === id ? updated : item)),
+        );
+        setSelected((item) => (item?.id === id ? updated : item));
+        setEditingId(null);
+      },
+      "Could not rename this chat.",
+    );
+  }
+
+  async function removeChat(item: Conversation) {
+    if (
+      !window.confirm(
+        `Delete “${item.title}” and its messages? This cannot be undone.`,
+      )
+    )
+      return;
+    await act(
+      "delete-chat",
+      async () => {
+        await deleteConversation(item.id);
+        const remaining = conversations.filter((chat) => chat.id !== item.id);
+        setConversations(remaining);
+        setEditingId(null);
+        if (selected?.id === item.id) {
+          loadRequest.current += 1;
+          const next = remaining[0] ?? null;
+          setSelected(next);
+          setMessages([]);
+          setQuestions(null);
+          setAnalysis(null);
+          setPrompts([]);
+          setRuns([]);
+          setDraft("");
+          if (next) void loadConversation(next);
+        }
+      },
+      "Could not delete this chat.",
     );
   }
 
@@ -295,7 +348,7 @@ export function ConversationWorkspace({
       async () => {
         let conversation = selected;
         if (!conversation) {
-          conversation = await createConversation(projectId, "New prompt");
+          conversation = await createConversation(projectId, "Untitled chat");
           setConversations((items) => [conversation!, ...items]);
           setSelected(conversation);
         }
@@ -309,6 +362,15 @@ export function ConversationWorkspace({
         submissionKey.current = null;
         setDraft("");
         setMessages((items) => [...items, message]);
+        try {
+          const titled = await getConversation(conversation.id);
+          setConversations((items) =>
+            items.map((item) => (item.id === titled.id ? titled : item)),
+          );
+          setSelected(titled);
+        } catch {
+          // The saved message remains usable even if refreshing its title fails.
+        }
         setAnalysis(null);
         setQuestions(null);
         setPrompts((items) =>
@@ -425,7 +487,17 @@ export function ConversationWorkspace({
 
   return (
     <div className="pilot-shell">
-      <aside className="pilot-sidebar" aria-label="PromptPilot navigation">
+      {sidebarOpen && (
+        <button
+          className="sidebar-scrim"
+          aria-label="Close navigation"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <aside
+        className={`pilot-sidebar ${sidebarOpen ? "sidebar-open" : ""}`}
+        aria-label="PromptPilot navigation"
+      >
         <div className="pilot-brand">
           <span className="pilot-mark">P</span>
           <div>
@@ -438,7 +510,7 @@ export function ConversationWorkspace({
           onClick={newConversation}
           disabled={!canWrite || loading || Boolean(busy)}
         >
-          <span>＋</span> New prompt
+          <span>＋</span> New chat
         </button>
         <div className="sidebar-section">
           <small>TOOLS</small>
@@ -468,18 +540,73 @@ export function ConversationWorkspace({
             <p>No saved prompts yet</p>
           ) : (
             conversations.map((item) => (
-              <button
+              <div
+                className={`chat-history-row ${selected?.id === item.id ? "chat-active" : ""}`}
                 key={item.id}
-                className={selected?.id === item.id ? "chat-active" : ""}
-                disabled={loading || Boolean(busy)}
-                onClick={() => {
-                  setSelected(item);
-                  void loadConversation(item);
-                }}
               >
-                <span>⌁</span>
-                <span>{item.title}</span>
-              </button>
+                {editingId === item.id ? (
+                  <form
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void saveTitle(item.id);
+                    }}
+                  >
+                    <input
+                      aria-label="Chat title"
+                      maxLength={120}
+                      value={editTitle}
+                      onChange={(event) => setEditTitle(event.target.value)}
+                      autoFocus
+                    />
+                    <button
+                      type="submit"
+                      aria-label="Save chat title"
+                      disabled={Boolean(busy)}
+                    >
+                      ✓
+                    </button>
+                  </form>
+                ) : (
+                  <>
+                    <button
+                      className="chat-history-title"
+                      disabled={loading || Boolean(busy)}
+                      onClick={() => {
+                        setSelected(item);
+                        setSidebarOpen(false);
+                        void loadConversation(item);
+                      }}
+                      title={item.title}
+                    >
+                      <span>⌁</span>
+                      <span>{item.title}</span>
+                    </button>
+                    {canWrite && (
+                      <div className="chat-history-actions">
+                        <button
+                          aria-label={`Rename ${item.title}`}
+                          title="Rename chat"
+                          disabled={Boolean(busy)}
+                          onClick={() => {
+                            setEditingId(item.id);
+                            setEditTitle(item.title);
+                          }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          aria-label={`Delete ${item.title}`}
+                          title="Delete chat"
+                          disabled={Boolean(busy)}
+                          onClick={() => void removeChat(item)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             ))
           )}
         </div>
@@ -493,8 +620,15 @@ export function ConversationWorkspace({
 
       <main className="pilot-chat">
         <header className="chat-header">
+          <button
+            className="mobile-navigation"
+            aria-label="Open navigation"
+            onClick={() => setSidebarOpen(true)}
+          >
+            ☰
+          </button>
           <div>
-            <strong>{selected?.title ?? "New prompt"}</strong>
+            <strong>{selected?.title ?? "New chat"}</strong>
             <span>Prompt improvement assistant</span>
           </div>
           <div
