@@ -20,6 +20,7 @@ import {
   testProviderConnection,
   updateAgentTask,
 } from "../../../../lib/orchestration";
+import { parseGitHubRepository } from "../../../../lib/github-repository";
 
 const providerDefaults: Record<ProviderName, string> = {
   openrouter: "openrouter/free",
@@ -158,15 +159,16 @@ export function AgentWorkspace({
 
   function saveRepository(event: FormEvent) {
     event.preventDefault();
-    const [owner, repo, extra] = repoName.trim().split("/");
-    if (!owner || !repo || extra) {
-      setError("Enter the repository as owner/repo.");
+    let destination;
+    try {
+      destination = parseGitHubRepository(repoName);
+    } catch (parseError) {
+      setError(message(parseError));
       return;
     }
     void act("github", async () => {
       await connectProjectRepository(projectId, {
-        owner,
-        repo,
+        ...destination,
         token: githubToken,
       });
       setGithubToken("");
@@ -282,14 +284,18 @@ export function AgentWorkspace({
             {canManageRepository && (
               <form className="agent-form" onSubmit={saveRepository}>
                 <label>
-                  Owner/repo
+                  GitHub repository URL or owner/repo
                   <input
                     value={repoName}
                     onChange={(event) => setRepoName(event.target.value)}
-                    placeholder="your-name/your-repo"
+                    placeholder="https://github.com/uzair592/promptpilot"
                     required
                   />
                 </label>
+                <p className="muted">
+                  Open the specific repository on GitHub and copy its address. A
+                  profile URL alone has no repository name.
+                </p>
                 <label>
                   GitHub fine-grained token (Contents and Pull requests write
                   access)
@@ -313,7 +319,13 @@ export function AgentWorkspace({
               </div>
             </div>
             <p className="muted">
-              Use your own keys. PromptPilot never shows a saved key again.
+              Add as many providers and models as you need. Each connection has
+              its own model and key; you can add another below. PromptPilot
+              never shows a saved key again.
+            </p>
+            <p className="muted">
+              To use two models from one provider, save two connections with
+              different names. You can reuse your provider key.
             </p>
             <form className="agent-form" onSubmit={saveConnection}>
               <label>
@@ -357,7 +369,7 @@ export function AgentWorkspace({
                 />
               </label>
               <button disabled={!canWrite || Boolean(busy)}>
-                Save encrypted connection
+                Add provider or model
               </button>
             </form>
             <div className="connection-list">

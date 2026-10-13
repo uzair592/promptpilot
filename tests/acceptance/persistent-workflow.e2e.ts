@@ -113,7 +113,7 @@ test("registers, completes, and restores the persistent product workflow", async
 
   await expect(page.getByText("My PromptPilot", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "New prompt" }).click();
+  await page.getByRole("button", { name: "New chat" }).click();
   const promptBox = page.getByRole("textbox", { name: "Prompt to improve" });
   await promptBox.fill(
     "Create a clear, concise plan for launching a community workshop.",

@@ -119,6 +119,19 @@ def update(
     return update_conversation(db, conversation, payload)
 
 
+@conversation_router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+def delete_chat(
+    conversation_id: UUID,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    conversation, project, _ = conversation_access(db, conversation_id, user, ProjectRole.EDITOR)
+    if project.status == "archived":
+        raise HTTPException(status_code=409, detail="Archived projects cannot be modified")
+    db.delete(conversation)
+    db.commit()
+
+
 @conversation_router.post(
     "/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED
 )

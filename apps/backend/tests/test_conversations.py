@@ -33,6 +33,18 @@ def test_message_idempotency_header_is_allowed_by_cors(client):
     assert "idempotency-key" in response.headers["access-control-allow-headers"].lower()
 
 
+def test_delete_chat_is_allowed_by_cors(client):
+    response = client.options(
+        "/api/v1/conversations/00000000-0000-0000-0000-000000000000",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "DELETE",
+        },
+    )
+    assert response.status_code == 200
+    assert "DELETE" in response.headers["access-control-allow-methods"]
+
+
 def test_conversation_message_persistence_and_idempotency(client):
     register(client, "owner@example.com", "Owner")
     project_id = project(client)
@@ -59,6 +71,35 @@ def test_conversation_message_persistence_and_idempotency(client):
     assert [(item["sequence"], item["content"]) for item in history.json()["items"]] == [
         (1, "Build a restaurant website.")
     ]
+
+
+def test_chat_title_from_first_prompt_and_delete_cascades(client):
+    register(client, "owner@example.com")
+    project_id = project(client)
+    conversation_id = client.post(
+        f"/api/v1/projects/{project_id}/conversations", json={"title": "Untitled chat"}
+    ).json()["id"]
+    client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={"role": "user", "content": "Build a reliable POS for my restaurant"},
+    )
+    detail = client.get(f"/api/v1/conversations/{conversation_id}")
+    assert detail.json()["title"] == "Build a reliable POS for my restaurant"
+    assert client.patch(
+        f"/api/v1/conversations/{conversation_id}", json={"title": "Restaurant POS plan"}
+    ).status_code == 200
+    client.post(
+        f"/api/v1/conversations/{conversation_id}/messages",
+        json={"role": "user", "content": "Add inventory"},
+    )
+    assert (
+        client.get(f"/api/v1/conversations/{conversation_id}").json()["title"]
+        == "Restaurant POS plan"
+    )
+    response = client.delete(f"/api/v1/conversations/{conversation_id}")
+    assert response.status_code == 204
+    assert client.get(f"/api/v1/conversations/{conversation_id}").status_code == 404
+    assert client.get(f"/api/v1/projects/{project_id}/conversations").json()["items"] == []
 
 
 def test_conversation_roles_update_and_member_permissions(client):

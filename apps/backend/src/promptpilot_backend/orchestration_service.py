@@ -1,6 +1,9 @@
 import hashlib
 import json
+import os
+import tempfile
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -172,11 +175,32 @@ TASK_PREREQUISITES = {
 
 
 def _cipher() -> Fernet:
-    value = get_settings().provider_key_encryption_key
+    settings = get_settings()
+    value = settings.provider_key_encryption_key
+    if not value and settings.app_env == "development":
+        storage = settings.ensure_storage_directory()
+        key_file = Path(storage) / ".provider-vault.key"
+        if not key_file.exists():
+            with tempfile.NamedTemporaryFile(dir=storage, prefix=".vault-", delete=False) as key_stream:
+                temporary_key = Path(key_stream.name)
+                key_stream.write(Fernet.generate_key())
+            try:
+                try:
+                    os.link(temporary_key, key_file)
+                except FileExistsError:
+                    pass
+            finally:
+                temporary_key.unlink(missing_ok=True)
+        try:
+            value = key_file.read_text(encoding="ascii").strip()
+        except OSError as error:
+            raise HTTPException(
+                status_code=503, detail="Local provider vault key could not be read"
+            ) from error
     if not value:
         raise HTTPException(
             status_code=503,
-            detail="Provider vault is not configured. Set PROVIDER_KEY_ENCRYPTION_KEY on the backend.",
+            detail="Set PROVIDER_KEY_ENCRYPTION_KEY on the backend to enable the provider vault.",
         )
     try:
         return Fernet(value.encode())

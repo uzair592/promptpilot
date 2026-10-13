@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -40,7 +41,28 @@ def list_conversations(
         )
         or 0
     )
-    return list(db.scalars(query.offset(offset).limit(limit)).all()), total
+    conversations = list(db.scalars(query.offset(offset).limit(limit)).all())
+    for conversation in conversations:
+        if conversation.title == "New prompt":
+            first = db.scalar(
+                select(Message)
+                .where(Message.conversation_id == conversation.id, Message.role == "user")
+                .order_by(Message.sequence.asc())
+                .limit(1)
+            )
+            if first:
+                conversation.title = title_from_message(first.content)
+    if db.dirty:
+        db.commit()
+    return conversations, total
+
+
+def title_from_message(content: str) -> str:
+    words = re.findall(r"[\w]+(?:['’-][\w]+)*", content, flags=re.UNICODE)
+    title = " ".join(words[:9]).strip()
+    if not title:
+        return "Untitled chat"
+    return title[:77].rstrip() + ("…" if len(title) > 77 or len(words) > 9 else "")
 
 
 def update_conversation(
@@ -90,6 +112,8 @@ def add_message(
         idempotency_key=idempotency_key,
     )
     db.add(message)
+    if payload.role == "user" and conversation.title in {"New prompt", "Untitled chat"}:
+        conversation.title = title_from_message(payload.content)
     conversation.updated_at = func.now()
     try:
         db.commit()

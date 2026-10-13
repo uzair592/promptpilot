@@ -100,7 +100,10 @@ model; availability and rate limits are controlled by OpenRouter.
 
 Provider keys are submitted over the same-origin authenticated API, encrypted
 before database storage, masked in every response, and never sent back to the
-browser. Set a stable `PROVIDER_KEY_ENCRYPTION_KEY` before saving connections:
+browser. In local development, PromptPilot creates a stable vault key in
+`STORAGE_PATH/.provider-vault.key` automatically. Keep that file with the local
+database: deleting it makes saved connections unreadable. In production, set a
+stable `PROVIDER_KEY_ENCRYPTION_KEY` before saving connections:
 
 ```powershell
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -112,7 +115,9 @@ connections and GitHub tokens unreadable. The generated prompt has a **Plan and
 build this project** link that transfers its text into the AI team's plan form.
 To connect GitHub, create a fine-grained GitHub token restricted to the chosen
 repository with **Contents** and **Pull requests** write access. The project
-owner enters `owner/repo` and the token in the AI team's GitHub form. The token
+owner enters `owner/repo` or a full repository URL such as
+`https://github.com/uzair592/promptpilot` and the token in the AI team's GitHub form.
+A profile URL such as `https://github.com/uzair592` lacks a repository name. The token
 is encrypted on the backend and never returned to the browser. A code specialist
 produces a JSON `files` draft. Review it, then select **Publish reviewed code to
 GitHub** to create a task branch and draft pull request. The app fetches a

@@ -324,6 +324,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {}
     throw new ApiError(detail, response.status);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -352,6 +353,15 @@ export const createConversation = (projectId: string, title: string) =>
     method: "POST",
     body: JSON.stringify({ title }),
   });
+export const getConversation = (conversationId: string) =>
+  api<Conversation>(`/api/v1/conversations/${conversationId}`);
+export const renameConversation = (conversationId: string, title: string) =>
+  api<Conversation>(`/api/v1/conversations/${conversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+export const deleteConversation = (conversationId: string) =>
+  api<void>(`/api/v1/conversations/${conversationId}`, { method: "DELETE" });
 export async function getMessages(conversationId: string): Promise<Message[]> {
   return (
     await api<{ items: Message[] }>(
