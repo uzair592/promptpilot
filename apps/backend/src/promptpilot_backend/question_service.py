@@ -89,7 +89,12 @@ def next_question(
             )
         ).all()
     )
-    gaps = [gap for gap in gaps if (gap.dimension, gap.title) not in addressed]
+    addressed_dimensions = {dimension for dimension, _ in addressed}
+    gaps = [
+        gap
+        for gap in gaps
+        if gap.dimension not in addressed_dimensions and gap.severity != "optional"
+    ]
     if not gaps:
         session.status = "completed"
         session.stop_reason = "no_unresolved_gaps"
@@ -99,6 +104,11 @@ def next_question(
     session_questions = list(
         db.scalars(select(Question).where(Question.session_id == session.id)).all()
     )
+    if len(session_questions) >= 3:
+        session.status = "completed"
+        session.stop_reason = "clarification_limit"
+        db.commit()
+        return None
     previous_texts = {" ".join(item.text.lower().split()) for item in session_questions}
     priority = SEVERITY_WEIGHT.get(gap.severity, 0)
     analysis = db.get(PromptAnalysis, session.latest_analysis_id or session.analysis_id)

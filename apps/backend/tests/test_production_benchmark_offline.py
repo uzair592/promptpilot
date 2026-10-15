@@ -62,14 +62,15 @@ def synthetic_manifest(tmp_path: Path, *, include_answers: bool = True) -> Path:
         for index, (dimension, target, answer_text) in enumerate(
             [
                 (
-                    "output",
-                    "What should the completed result look like?",
-                    "Return a practical step-by-step workshop plan.",
+                    "context",
+                    "What are you launching, and what outcome should the launch achieve?",
+                    "The workshop teaches beginner budgeting to local adults.",
                 ),
                 (
-                    "constraints",
-                    "Are there important constraints, limits, or preferences?",
-                    "Use a budget of 100 fictional credits.",
+                    "output",
+                    "For “Create a practical plan for launching a small community workshop”, "
+                    "who will use the plan and how much detail do they need?",
+                    "Return a practical step-by-step plan using 100 fictional credits.",
                 ),
             ],
             start=1,

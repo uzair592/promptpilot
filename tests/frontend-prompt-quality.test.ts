@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { assessPromptQuality } from "../apps/frontend/lib/prompt-quality.js";
 
 describe("live prompt quality meter", () => {
+  it("does not award task completeness to greetings or reactions", () => {
+    for (const value of ["hi", "Amazing!", "hello", "thanks"]) {
+      expect(assessPromptQuality(value).score).toBe(0);
+    }
+  });
   it("keeps an empty prompt at zero", () => {
     expect(assessPromptQuality(" ")).toMatchObject({
       score: 0,

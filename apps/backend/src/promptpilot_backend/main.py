@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from alembic import command
 from alembic.config import Config as AlembicConfig
 from alembic.script import ScriptDirectory
 from fastapi import FastAPI, HTTPException, Request
@@ -46,6 +47,14 @@ def prepare_database_and_storage() -> None:
     settings.validate()
     settings.ensure_storage_directory()
     if settings.app_env in {"development", "test"}:
+        inspector = inspect(engine)
+        if inspector.has_table("provider_connections") and "models_json" not in {
+            column["name"] for column in inspector.get_columns("provider_connections")
+        }:
+            migration_config = AlembicConfig(str(migration_config_path()))
+            if not inspector.has_table("alembic_version"):
+                command.stamp(migration_config, "9d6f4a8c2e11")
+            command.upgrade(migration_config, "head")
         Base.metadata.create_all(bind=engine)
         return
 
@@ -79,7 +88,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Idempotency-Key", "X-Request-Id"],
 )
 

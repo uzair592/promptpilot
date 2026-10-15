@@ -172,7 +172,10 @@ def publish_task(
             pull_request_url=task.pull_request_url,
             branch=f"promptpilot/task-{task.id}",
         )
-    if task.role not in {"frontend", "backend", "api"} or task.status != "review":
+    if (
+        task.role not in {"frontend", "backend", "api"}
+        or task.status not in {"review", "completed"}
+    ):
         raise HTTPException(status_code=409, detail="A reviewed code task is required")
     files = reviewed_files(task.output_text)
     branch = f"promptpilot/task-{task.id}"

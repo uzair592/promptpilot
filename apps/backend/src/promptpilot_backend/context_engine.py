@@ -122,7 +122,10 @@ class ContextAssembler:
             if relevance:
                 authority = SOURCE_AUTHORITY["memory"] + (0.12 if item.source == "user" else 0)
                 candidates.append(ContextCandidate(item.content, "memory", relevance, authority, str(item.id), f"memory {item.category}: {item.subject}", {"category": item.category, "subject": item.subject, "source": item.source}))
-        candidates.extend(self._answers(db, input_data))
+        direct_answers = self._answers(db, input_data)
+        answer_contents = {normalized(item.content) for item in direct_answers}
+        candidates = [item for item in candidates if normalized(item.content) not in answer_contents]
+        candidates.extend(direct_answers)
         document_items = self.retriever.retrieve(db, input_data.project_id, input_data.task, input_data.top_k)
         for doc_item in document_items:
             candidates.append(ContextCandidate(doc_item.content, "document", doc_item.score / 2, SOURCE_AUTHORITY["document"], str(doc_item.chunk_id), doc_item.provenance, {**doc_item.metadata, "document_id": str(doc_item.document_id), "chunk_id": str(doc_item.chunk_id)}))
@@ -132,7 +135,7 @@ class ContextAssembler:
                 for gap in db.scalars(select(InformationGap).where(InformationGap.analysis_id == analysis.id, InformationGap.status != "resolved")).all():
                     if gap.dimension == "constraints" and self._relevance(input_data.task, gap.description):
                         candidates.append(ContextCandidate(gap.description, "constraint", self._relevance(input_data.task, gap.description), SOURCE_AUTHORITY["constraint"], str(gap.id), f"analysis gap {gap.id}", {"gap_id": str(gap.id), "source": "ai_inferred"}))
-        candidates.sort(key=lambda item: (-item.priority * item.score, -item.score, item.source_type, item.identifier))
+        candidates.sort(key=lambda item: (0 if item.source_type == "answer" and input_data.message_id else 1, -item.priority * item.score, -item.score, item.source_type, item.identifier))
         selected: list[ContextCandidate] = []
         omissions: list[dict[str, str]] = []
         seen: dict[str, int] = {}

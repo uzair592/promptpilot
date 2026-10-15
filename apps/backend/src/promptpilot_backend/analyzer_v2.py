@@ -13,6 +13,7 @@ from .llm_provider import (
     ProviderUnavailable,
 )
 from .models import InformationGap, Message, PromptAnalysis
+from .prompt_intent import is_small_talk
 from .provider_observation import (
     ProviderCallObservation,
     ProviderObserver,
@@ -45,6 +46,10 @@ class AnalysisReconciler:
             dimension.evidence = ai_dimension.evidence or dimension.evidence
             dimension.explanation = ai_dimension.explanation or dimension.explanation
         existing = {(gap.dimension, gap.title.lower()) for gap in baseline.gaps}
+        for baseline_gap in baseline.gaps:
+            finding = ai_result.dimensions.get(baseline_gap.dimension)
+            if finding and finding.applicable and finding.score is not None and finding.score >= 80:
+                baseline_gap.status = "resolved"
         for gap in ai_result.information_gaps:
             key = (gap.dimension, gap.title.lower())
             if key in existing:
@@ -88,6 +93,8 @@ def analyze_hybrid(
 ) -> PromptAnalysis:
     if mode not in {"baseline", "ai", "hybrid"}:
         mode = "hybrid"
+    if is_small_talk(message.content):
+        mode = "baseline"
     result = analyze_message(db, project_id, conversation_id, message)
     result.analysis_version = "prompt-analyzer-v2" if mode != "baseline" else "prompt-analyzer-v1"
     result.analysis_mode = "baseline"

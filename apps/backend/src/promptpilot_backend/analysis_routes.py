@@ -11,6 +11,7 @@ from .dependencies import current_user
 from .llm_provider import ProviderError
 from .models import Message, PromptAnalysis, User
 from .project_policy import ProjectRole
+from .provider_selection import chat_provider
 from .question_service import create_question_session
 from .schemas import PromptAnalysisResponse
 
@@ -49,6 +50,7 @@ def create_analysis(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
     mode: str = Query(default="hybrid"),
+    connection_id: UUID | None = None,
 ) -> PromptAnalysisResponse:
     conversation, project, _ = conversation_access(db, conversation_id, user, ProjectRole.MEMBER)
     message = db.scalar(
@@ -59,7 +61,8 @@ def create_analysis(
     if message.role != "user":
         raise HTTPException(status_code=422, detail="Only user messages can be analyzed")
     try:
-        analysis = analyze_hybrid(db, project.id, conversation.id, message, mode)
+        analysis = analyze_hybrid(db, project.id, conversation.id, message, mode,
+                                 provider=chat_provider(db, user.id, connection_id))
         create_question_session(db, analysis)
         return PromptAnalysisResponse.model_validate(analysis)
     except ProviderError as error:

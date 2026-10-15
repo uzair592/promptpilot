@@ -334,7 +334,7 @@ export const friendlyError = (error: unknown, fallback: string): string => {
       return "Your session expired. Sign in again to continue.";
     if (error.status === 403 || error.status === 404)
       return "This item is unavailable or you no longer have access.";
-    if ([409, 422, 503].includes(error.status)) return error.message;
+    if ([409, 422, 429, 502, 503].includes(error.status)) return error.message;
   }
   return fallback;
 };
@@ -379,31 +379,47 @@ export const sendMessage = (
     headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ role: "user", content }),
   });
-export const analyzeMessage = (conversationId: string, messageId: string) =>
+export const analyzeMessage = (
+  conversationId: string,
+  messageId: string,
+  connectionId?: string,
+) =>
   api<PromptAnalysis>(
-    `/api/v1/conversations/${conversationId}/messages/${messageId}/analysis`,
+    `/api/v1/conversations/${conversationId}/messages/${messageId}/analysis${connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : ""}`,
     { method: "POST" },
   );
 export const getLatestAnalysis = (conversationId: string, messageId: string) =>
   api<PromptAnalysis>(
     `/api/v1/conversations/${conversationId}/messages/${messageId}/analysis`,
   );
-export const getNextQuestion = (conversationId: string, messageId?: string) =>
+export const getNextQuestion = (
+  conversationId: string,
+  messageId?: string,
+  connectionId?: string,
+) =>
   api<QuestionSession>(
-    `/api/v1/conversations/${conversationId}/questions/next${messageId ? `?message_id=${encodeURIComponent(messageId)}` : ""}`,
+    `/api/v1/conversations/${conversationId}/questions/next${messageId || connectionId ? `?${new URLSearchParams({ ...(messageId ? { message_id: messageId } : {}), ...(connectionId ? { connection_id: connectionId } : {}) })}` : ""}`,
   );
 export const answerQuestion = (
   conversationId: string,
   questionId: string,
   content: string,
+  connectionId?: string,
 ) =>
   api<QuestionSession>(
     `/api/v1/conversations/${conversationId}/questions/${questionId}/answers`,
-    { method: "POST", body: JSON.stringify({ content }) },
+    {
+      method: "POST",
+      body: JSON.stringify({ content, connection_id: connectionId }),
+    },
   );
-export const skipQuestion = (conversationId: string, questionId: string) =>
+export const skipQuestion = (
+  conversationId: string,
+  questionId: string,
+  connectionId?: string,
+) =>
   api<QuestionSession>(
-    `/api/v1/conversations/${conversationId}/questions/${questionId}/skip`,
+    `/api/v1/conversations/${conversationId}/questions/${questionId}/skip${connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : ""}`,
     { method: "POST" },
   );
 export const getMemory = (projectId: string) =>
@@ -442,10 +458,18 @@ export const generatePrompt = (
   conversationId: string,
   messageId: string,
   mode: string,
+  connectionId?: string,
 ) =>
   api<GeneratedPrompt>(
     `/api/v1/conversations/${conversationId}/prompts/generate`,
-    { method: "POST", body: JSON.stringify({ message_id: messageId, mode }) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        message_id: messageId,
+        mode,
+        connection_id: connectionId,
+      }),
+    },
   );
 export const getRuns = (conversationId: string) =>
   api<ModelRun[]>(`/api/v1/conversations/${conversationId}/prompts/runs`);
@@ -454,12 +478,17 @@ export const executePrompt = (
   versionId: string,
   messageId: string,
   strategy: "baseline" | "promptpilot",
+  connectionId?: string,
 ) =>
   api<ModelRun>(
     `/api/v1/conversations/${conversationId}/prompts/${versionId}/execute`,
     {
       method: "POST",
-      body: JSON.stringify({ strategy, message_id: messageId }),
+      body: JSON.stringify({
+        strategy,
+        message_id: messageId,
+        connection_id: connectionId,
+      }),
     },
   );
 export async function getEvaluations(

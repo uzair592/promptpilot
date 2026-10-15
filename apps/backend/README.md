@@ -16,8 +16,11 @@ The default development database is SQLite when `DATABASE_URL` is omitted. Produ
 
 Production settings validate the PostgreSQL URL, HTTPS CORS origins, absolute persistent storage, request limits, and all-or-none LLM configuration. LLM credentials are optional for startup. `/healthz` is a process check; `/readyz` verifies database connectivity. Registration and login share database-backed throttling: 20 attempts per normalized account identity per 15-minute window.
 
-The multi-model provider vault supports OpenRouter, OpenAI, Anthropic, and Google
-Gemini through fixed official API origins. Local development creates a stable
+The multi-model vault uses `/api/v1/provider-connections/catalog`, including
+OpenRouter, OpenAI, Anthropic, Gemini, Grok, DeepSeek, Mistral, and Groq.
+Custom OpenAI-compatible endpoints require public HTTPS addresses. Redirects
+are not followed and private destinations are rejected. Both chat and delivery
+tasks use the authenticated user's selected connection. Local development creates a stable
 Fernet key in `STORAGE_PATH/.provider-vault.key` on first use; keep this file
 with the local database. Production requires a persistent `PROVIDER_KEY_ENCRYPTION_KEY`.
 Keys are encrypted at

@@ -161,6 +161,8 @@ def test_run_task_uses_assigned_provider_and_persists_review_output(client, monk
     task_id = plan["milestones"][0]["tasks"][0]["id"]
 
     class FakeResponse:
+        status_code = 200
+        headers = {}
         def raise_for_status(self) -> None:
             return None
 
@@ -171,7 +173,7 @@ def test_run_task_uses_assigned_provider_and_persists_review_output(client, monk
             }
 
     class FakeClient:
-        def __init__(self, *, timeout: float) -> None:
+        def __init__(self, *, timeout: float, follow_redirects: bool = False) -> None:
             assert timeout > 0
 
         def __enter__(self):
@@ -187,7 +189,7 @@ def test_run_task_uses_assigned_provider_and_persists_review_output(client, monk
             assert headers["Authorization"] == "Bearer sk-or-test-secret-1234"
             return FakeResponse()
 
-    monkeypatch.setattr("promptpilot_backend.orchestration_service.httpx.Client", FakeClient)
+    monkeypatch.setattr("promptpilot_backend.provider_gateway.httpx.Client", FakeClient)
 
     response = client.post(f"/api/v1/agent-tasks/{task_id}/run")
 
@@ -212,7 +214,7 @@ def test_run_task_uses_assigned_provider_and_persists_review_output(client, monk
             captured.append(messages[0]["content"])
             return super().post(url, **kwargs)
 
-    monkeypatch.setattr("promptpilot_backend.orchestration_service.httpx.Client", HandoffClient)
+    monkeypatch.setattr("promptpilot_backend.provider_gateway.httpx.Client", HandoffClient)
     second = client.post(f"/api/v1/agent-tasks/{next_task_id}/run")
     assert second.status_code == 200
     assert "Create and verify a secure point of sale application." in captured[0]
@@ -266,6 +268,8 @@ def test_tester_receives_both_parallel_implementation_handoffs(client, monkeypat
     received: list[str] = []
 
     class FakeResponse:
+        status_code = 200
+        headers = {}
         def raise_for_status(self) -> None:
             pass
 
@@ -273,7 +277,7 @@ def test_tester_receives_both_parallel_implementation_handoffs(client, monkeypat
             return {"choices": [{"message": {"content": "Test plan"}}]}
 
     class FakeClient:
-        def __init__(self, *, timeout: float) -> None:
+        def __init__(self, *, timeout: float, follow_redirects: bool = False) -> None:
             pass
 
         def __enter__(self):
@@ -288,7 +292,7 @@ def test_tester_receives_both_parallel_implementation_handoffs(client, monkeypat
             received.append(body["messages"][0]["content"])
             return FakeResponse()
 
-    monkeypatch.setattr("promptpilot_backend.orchestration_service.httpx.Client", FakeClient)
+    monkeypatch.setattr("promptpilot_backend.provider_gateway.httpx.Client", FakeClient)
     response = client.post(f"/api/v1/agent-tasks/{tester_id}/run")
     assert response.status_code == 200
     assert "Output from backend: Implement backend foundation" in received[0]

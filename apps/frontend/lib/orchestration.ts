@@ -1,4 +1,11 @@
-export type ProviderName = "openai" | "anthropic" | "gemini" | "openrouter";
+export type ProviderName = string;
+export type ProviderDefinition = {
+  id: string;
+  label: string;
+  base_url: string;
+  protocol: string;
+  default_model: string;
+};
 
 export type ProviderConnection = {
   id: string;
@@ -6,6 +13,8 @@ export type ProviderConnection = {
   label: string;
   masked_key: string;
   default_model: string;
+  base_url?: string | null;
+  available_models?: string[];
   status: "untested" | "active" | "invalid" | "disabled";
   last_tested_at: string | null;
   last_test_status: string | null;
@@ -33,6 +42,7 @@ export type AgentTask = {
   assigned_connection_id: string | null;
   assigned_provider: ProviderName | null;
   assigned_model: string | null;
+  review_notes?: string | null;
   acceptance_criteria: string[];
   dependencies: string[];
   status: string;
@@ -57,6 +67,7 @@ export type PlanMilestone = {
 };
 
 export type ProjectPlan = {
+  planning_mode?: string;
   id: string;
   project_id: string;
   title: string;
@@ -101,6 +112,7 @@ export function addProviderConnection(input: {
   label: string;
   api_key: string;
   default_model: string;
+  base_url?: string;
 }): Promise<ProviderConnection> {
   return api("/api/v1/provider-connections", {
     method: "POST",
@@ -114,6 +126,69 @@ export function testProviderConnection(
   return api(`/api/v1/provider-connections/${id}/test`, { method: "POST" });
 }
 
+export async function getProviderCatalog(): Promise<ProviderDefinition[]> {
+  return (
+    await api<{ items: ProviderDefinition[] }>(
+      "/api/v1/provider-connections/catalog",
+    )
+  ).items;
+}
+export const discoverProviderModels = (input: {
+  provider: string;
+  api_key: string;
+  base_url?: string;
+}) =>
+  api<{ models: string[] }>("/api/v1/provider-connections/discover", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export const updateProviderModel = (id: string, defaultModel: string) =>
+  api<ProviderConnection>(`/api/v1/provider-connections/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ default_model: defaultModel }),
+  });
+export const disableProvider = (id: string) =>
+  api<ProviderConnection>(`/api/v1/provider-connections/${id}/disable`, {
+    method: "POST",
+  });
+
+export type AgentRun = {
+  id: string;
+  task_id: string;
+  provider: string;
+  model: string;
+  status: string;
+  output_text: string | null;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
+};
+export const getAgentRuns = (id: string) =>
+  api<AgentRun[]>(`/api/v1/agent-tasks/${id}/runs`);
+export const addAgentTask = (
+  planId: string,
+  input: {
+    title: string;
+    description: string;
+    role: AgentTask["role"];
+    milestone_id?: string;
+  },
+) =>
+  api<AgentTask>(`/api/v1/plans/${planId}/tasks`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+export async function deleteAgentTask(id: string): Promise<void> {
+  const response = await fetch(`/api/v1/agent-tasks/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    const body = await response.json();
+    throw new Error(body.error?.message || "Could not remove this node");
+  }
+}
+
 export async function getPlans(projectId: string): Promise<ProjectPlan[]> {
   return (
     await api<{ items: ProjectPlan[] }>(`/api/v1/projects/${projectId}/plans`)
@@ -122,7 +197,12 @@ export async function getPlans(projectId: string): Promise<ProjectPlan[]> {
 
 export function createPlan(
   projectId: string,
-  input: { title: string; idea: string; start_at: string | null },
+  input: {
+    title: string;
+    idea: string;
+    start_at: string | null;
+    planner_connection_id?: string;
+  },
 ): Promise<ProjectPlan> {
   return api(`/api/v1/projects/${projectId}/plans`, {
     method: "POST",
@@ -136,6 +216,12 @@ export function updateAgentTask(
     assigned_connection_id?: string | null;
     scheduled_for?: string | null;
     status?: string;
+    assigned_model?: string | null;
+    title?: string;
+    description?: string;
+    acceptance_criteria?: string[];
+    dependencies?: string[];
+    review_notes?: string;
   },
 ): Promise<AgentTask> {
   return api(`/api/v1/agent-tasks/${taskId}`, {

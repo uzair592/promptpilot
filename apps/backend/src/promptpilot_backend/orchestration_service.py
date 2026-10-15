@@ -4,16 +4,17 @@ import os
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
-from uuid import UUID
+from typing import Any, cast
+from uuid import UUID, uuid4
 
-import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from .config import get_settings
+from .llm_provider import ProviderUnavailable
 from .models import (
     AgentRun,
     AgentTask,
@@ -24,6 +25,7 @@ from .models import (
     User,
     utc_now,
 )
+from .provider_gateway import ProviderGateway
 from .schemas import (
     AgentRunResponse,
     AgentTaskResponse,
@@ -33,13 +35,6 @@ from .schemas import (
     ProviderConnectionCreateRequest,
     ProviderConnectionResponse,
 )
-
-PROVIDER_BASE_URLS = {
-    "openai": "https://api.openai.com/v1",
-    "anthropic": "https://api.anthropic.com/v1",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta",
-    "openrouter": "https://openrouter.ai/api/v1",
-}
 
 ROLE_PREFERENCES = {
     "orchestrator": ("openrouter", "openai", "anthropic", "gemini"),
@@ -168,7 +163,8 @@ TASK_PREREQUISITES = {
     "Implement backend foundation": ("Design backend and data contracts",),
     "Implement the primary interface": ("Design API contracts",),
     "Run independent quality review": (
-        "Implement backend foundation", "Implement the primary interface"
+        "Implement backend foundation",
+        "Implement the primary interface",
     ),
     "Prepare release decision": ("Run independent quality review",),
 }
@@ -181,7 +177,9 @@ def _cipher() -> Fernet:
         storage = settings.ensure_storage_directory()
         key_file = Path(storage) / ".provider-vault.key"
         if not key_file.exists():
-            with tempfile.NamedTemporaryFile(dir=storage, prefix=".vault-", delete=False) as key_stream:
+            with tempfile.NamedTemporaryFile(
+                dir=storage, prefix=".vault-", delete=False
+            ) as key_stream:
                 temporary_key = Path(key_stream.name)
                 key_stream.write(Fernet.generate_key())
             try:
@@ -217,6 +215,8 @@ def provider_response(connection: ProviderConnection) -> ProviderConnectionRespo
         label=connection.label,
         masked_key=f"••••{connection.key_last_four}",
         default_model=connection.default_model,
+        base_url=connection.base_url,
+        available_models=json.loads(connection.models_json or "[]"),
         status=connection.status,
         last_tested_at=connection.last_tested_at,
         last_test_status=connection.last_test_status,
@@ -238,6 +238,7 @@ def create_provider_connection(
         key_fingerprint=hashlib.sha256(api_key.encode()).hexdigest(),
         key_last_four=api_key[-4:],
         default_model=payload.default_model.strip(),
+        base_url=payload.base_url,
     )
     db.add(connection)
     try:
@@ -271,44 +272,31 @@ def user_connection(db: Session, connection_id: UUID, user_id: UUID) -> Provider
     return connection
 
 
-def _headers(provider: str, api_key: str) -> dict[str, str]:
-    if provider == "anthropic":
-        return {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-    if provider == "gemini":
-        return {"x-goog-api-key": api_key}
-    return {"Authorization": f"Bearer {api_key}"}
-
-
 def test_provider_connection(connection: ProviderConnection) -> list[str]:
-    api_key = decrypt_api_key(connection)
-    url = f"{PROVIDER_BASE_URLS[connection.provider]}/models"
     try:
-        with httpx.Client(timeout=get_settings().llm_timeout) as client:
-            response = client.get(url, headers=_headers(connection.provider, api_key))
-            response.raise_for_status()
-            payload = response.json()
-    except (httpx.HTTPError, ValueError) as error:
-        raise HTTPException(
-            status_code=502, detail="Provider rejected the connection test"
-        ) from error
-    values = payload.get("data", payload.get("models", []))
-    models: list[str] = []
-    if isinstance(values, list):
-        for value in values:
-            if isinstance(value, dict):
-                model_id = value.get("id") or value.get("name")
-                if isinstance(model_id, str):
-                    models.append(model_id.removeprefix("models/"))
-    return sorted(set(models))[:200]
+        return ProviderGateway(
+            connection.provider,
+            connection.default_model,
+            decrypt_api_key(connection),
+            connection.base_url,
+        ).list_models()
+    except ProviderUnavailable as error:
+        raise HTTPException(status_code=502, detail=error.reason) from None
 
 
 def record_connection_test(
-    db: Session, connection: ProviderConnection, status: str, message: str
+    db: Session,
+    connection: ProviderConnection,
+    status: str,
+    message: str,
+    models: list[str] | None = None,
 ) -> None:
     connection.last_tested_at = utc_now()
     connection.last_test_status = status
     connection.last_test_message = message[:500]
     connection.status = "active" if status == "passed" else "invalid"
+    if models is not None:
+        connection.models_json = json.dumps(models)
     db.commit()
 
 
@@ -323,18 +311,34 @@ def _choose_connection(
                 match,
                 f"{match.provider.title()} is the highest available preference for the {role} role.",
             )
+    if active:
+        return active[
+            0
+        ], "Assigned an available model; you can choose a specialist in the node inspector."
     return None, "No active provider is connected; assign one before running this task."
 
 
 def create_project_plan(
     db: Session, project_id: UUID, user: User, payload: ProjectPlanCreateRequest
 ) -> ProjectPlan:
+    from .workflow_service import generate_workflow
+
+    generated = None
+    if payload.planner_connection_id:
+        planner = user_connection(db, payload.planner_connection_id, user.id)
+        if planner.status != "active":
+            raise HTTPException(status_code=409, detail="Test the planner connection first")
+        try:
+            generated = generate_workflow(planner, payload.idea)
+        except ProviderUnavailable as error:
+            raise HTTPException(status_code=503, detail=error.reason) from None
     plan = ProjectPlan(
         project_id=project_id,
         created_by_id=user.id,
         title=payload.title.strip(),
         summary=payload.idea.strip(),
         status="active",
+        planning_mode="ai" if generated else "template",
     )
     db.add(plan)
     db.flush()
@@ -346,8 +350,55 @@ def create_project_plan(
         )
     )
     task_ids: dict[str, str] = {}
+    if generated:
+        for section in generated.milestones:
+            for spec in section.tasks:
+                task_ids[spec.key] = str(uuid4())
+    else:
+        for _, _, specs in PLAN_TEMPLATE:
+            for task_title, _, _, _ in specs:
+                task_ids[task_title] = str(uuid4())
     task_number = 0
-    for position, (title, description, task_specs) in enumerate(PLAN_TEMPLATE, start=1):
+    sections: list[tuple[str, str, list[tuple[str, str, str, list[str], str, list[str]]]]] = (
+        [
+            (
+                section.title,
+                section.description,
+                [
+                    (
+                        spec.title,
+                        spec.description,
+                        spec.role,
+                        spec.acceptance_criteria,
+                        spec.key,
+                        spec.dependencies,
+                    )
+                    for spec in section.tasks
+                ],
+            )
+            for section in generated.milestones
+        ]
+        if generated
+        else [
+            (
+                title,
+                description,
+                [
+                    (
+                        task_title,
+                        task_description,
+                        role,
+                        list(criteria),
+                        task_title,
+                        list(TASK_PREREQUISITES.get(task_title, ())),
+                    )
+                    for task_title, task_description, role, criteria in specs
+                ],
+            )
+            for title, description, specs in PLAN_TEMPLATE
+        ]
+    )
+    for position, (title, description, task_specs) in enumerate(sections, start=1):
         due_at = payload.start_at + timedelta(days=position * 7) if payload.start_at else None
         milestone = PlanMilestone(
             plan_id=plan.id,
@@ -359,12 +410,13 @@ def create_project_plan(
         )
         db.add(milestone)
         db.flush()
-        for task_title, task_description, role, criteria in task_specs:
+        for task_title, task_description, role, criteria, key, dependencies in task_specs:
             connection, reason = _choose_connection(connections, role)
             scheduled_for = (
                 payload.start_at + timedelta(days=task_number * 3) if payload.start_at else None
             )
             task = AgentTask(
+                id=UUID(task_ids[key]),
                 project_id=project_id,
                 plan_id=plan.id,
                 milestone_id=milestone.id,
@@ -376,15 +428,12 @@ def create_project_plan(
                 role=role,
                 assignment_reason=reason,
                 acceptance_criteria_json=json.dumps(criteria),
-                dependencies_json=json.dumps(
-                    [task_ids[name] for name in TASK_PREREQUISITES.get(task_title, ())]
-                ),
+                dependencies_json=json.dumps([task_ids[name] for name in dependencies]),
                 status="scheduled" if scheduled_for else "backlog",
                 scheduled_for=scheduled_for,
             )
             db.add(task)
             db.flush()
-            task_ids[task_title] = str(task.id)
             task_number += 1
     db.commit()
     db.refresh(plan)
@@ -409,6 +458,7 @@ def task_response(db: Session, task: AgentTask) -> AgentTaskResponse:
         assigned_connection_id=task.assigned_connection_id,
         assigned_provider=connection.provider if connection else None,
         assigned_model=task.assigned_model,
+        review_notes=task.review_notes,
         acceptance_criteria=json.loads(task.acceptance_criteria_json),
         dependencies=json.loads(task.dependencies_json),
         status=task.status,
@@ -456,37 +506,12 @@ def plan_response(db: Session, plan: ProjectPlan) -> ProjectPlanResponse:
         project_id=plan.project_id,
         title=plan.title,
         summary=plan.summary,
+        planning_mode=plan.planning_mode,
         status=plan.status,
         created_at=plan.created_at,
         updated_at=plan.updated_at,
         milestones=milestone_responses,
     )
-
-
-def _extract_output(provider: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    if provider == "anthropic":
-        blocks = payload.get("content", [])
-        text = "\n".join(block.get("text", "") for block in blocks if isinstance(block, dict))
-        return text, payload.get("usage", {})
-    if provider == "gemini":
-        candidates = payload.get("candidates", [])
-        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
-        return "\n".join(part.get("text", "") for part in parts), payload.get("usageMetadata", {})
-    if provider == "openai":
-        if isinstance(payload.get("output_text"), str):
-            return payload["output_text"], payload.get("usage", {})
-        output = payload.get("output", [])
-        texts = [
-            part.get("text", "")
-            for item in output
-            if isinstance(item, dict)
-            for part in item.get("content", [])
-            if isinstance(part, dict)
-        ]
-        return "\n".join(texts), payload.get("usage", {})
-    choices = payload.get("choices", [])
-    text = choices[0].get("message", {}).get("content", "") if choices else ""
-    return str(text), payload.get("usage", {})
 
 
 def execute_agent_task(db: Session, task: AgentTask, connection: ProviderConnection) -> AgentRun:
@@ -535,7 +560,7 @@ def execute_agent_task(db: Session, task: AgentTask, connection: ProviderConnect
         f"You are the {task.role} specialist in a supervised software delivery team. "
         "Produce a reviewable work product; do not claim you changed files or ran tests.\n\n"
         f"Project goal and improved prompt:\n{plan.summary[:20000]}\n\n"
-        f"Approved upstream work:\n{handoff or 'This is the first task.'}\n\n"
+        f"Upstream model outputs:\n{handoff or 'This is the first task.'}\n\n"
         f"Repository source snapshot (default branch):\n{source_context or 'No source files available.'}\n\n"
         f"Task: {task.title}\n{task.description}\n\n"
         f"Acceptance criteria: {task.acceptance_criteria_json}"
@@ -546,24 +571,19 @@ def execute_agent_task(db: Session, task: AgentTask, connection: ProviderConnect
             "containing 'path' and 'content' text fields. Use relative paths and "
             "complete files. The user will inspect this draft before publication."
         )
-    headers = {**_headers(connection.provider, api_key), "content-type": "application/json"}
-    if connection.provider == "anthropic":
-        url = f"{PROVIDER_BASE_URLS['anthropic']}/messages"
-        body: dict[str, Any] = {
-            "model": model,
-            "max_tokens": 2500,
-            "messages": [{"role": "user", "content": instruction}],
-        }
-    elif connection.provider == "gemini":
-        url = f"{PROVIDER_BASE_URLS['gemini']}/models/{model}:generateContent"
-        body = {"contents": [{"role": "user", "parts": [{"text": instruction}]}]}
-    elif connection.provider == "openai":
-        url = f"{PROVIDER_BASE_URLS['openai']}/responses"
-        body = {"model": model, "input": instruction}
-    else:
-        url = f"{PROVIDER_BASE_URLS['openrouter']}/chat/completions"
-        body = {"model": model, "messages": [{"role": "user", "content": instruction}]}
-
+    claimed = db.execute(
+        update(AgentTask)
+        .where(
+            AgentTask.id == task.id,
+            AgentTask.status.in_(("backlog", "ready", "scheduled", "failed", "review")),
+        )
+        .values(status="running", attempt_count=AgentTask.attempt_count + 1)
+    )
+    if cast(CursorResult[Any], claimed).rowcount != 1:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="This node is already running or has been closed"
+        )
     run = AgentRun(
         task_id=task.id,
         connection_id=connection.id,
@@ -571,16 +591,12 @@ def execute_agent_task(db: Session, task: AgentTask, connection: ProviderConnect
         model=model,
         status="running",
     )
-    task.status = "running"
-    task.attempt_count += 1
     db.add(run)
     db.commit()
     try:
-        with httpx.Client(timeout=get_settings().llm_timeout) as client:
-            response = client.post(url, headers=headers, json=body)
-            response.raise_for_status()
-            payload = response.json()
-        output, usage = _extract_output(connection.provider, payload)
+        output, usage = ProviderGateway(
+            connection.provider, model, api_key, connection.base_url
+        ).complete(instruction)
         if not output.strip():
             raise ValueError("Provider returned no text")
         run.status = "succeeded"
@@ -590,14 +606,14 @@ def execute_agent_task(db: Session, task: AgentTask, connection: ProviderConnect
         task.status = "review"
         task.output_text = output
         task.last_error = None
-    except (httpx.HTTPError, ValueError) as error:
+    except Exception as error:
         run.status = "failed"
-        run.error_message = "Provider request failed"
+        run.error_message = (
+            error.reason if isinstance(error, ProviderUnavailable) else "Provider request failed"
+        )
         run.completed_at = datetime.now(UTC)
         task.status = "failed"
-        task.last_error = (
-            "Provider request failed. Verify the key, model, credits, and provider availability."
-        )
+        task.last_error = run.error_message
         db.commit()
         raise HTTPException(status_code=502, detail=task.last_error) from error
     db.commit()

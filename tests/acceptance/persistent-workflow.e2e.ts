@@ -128,7 +128,10 @@ test("registers, completes, and restores the persistent product workflow", async
   await page.getByRole("button", { name: "Improve prompt" }).click();
   expect((await savedRequest).status()).toBe(201);
   await expect(
-    page.getByText("Create a clear, concise plan", { exact: false }),
+    page.getByText(
+      "Create a clear, concise plan for launching a community workshop.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(page.getByText(/I found \d+ area/)).toBeVisible();
 
@@ -197,12 +200,24 @@ test("registers, completes, and restores the persistent product workflow", async
 
   await page.reload();
   await expect(
-    page.getByText("Create a clear, concise plan", { exact: false }),
+    page.getByText(
+      "Create a clear, concise plan for launching a community workshop.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(promptReady).toBeVisible();
   await expect(page.getByText(/Local deterministic response/)).toHaveCount(2);
 
   const improvedIdea = await page.locator(".optimized-prompt").innerText();
+  await page
+    .getByRole("textbox", { name: "Prompt to improve" })
+    .fill("amazing");
+  await expect(page.locator(".large-quality")).toContainText("0/100");
+  await expect(page.locator(".header-score")).toHaveAttribute(
+    "aria-label",
+    "Prompt quality 0 out of 100",
+  );
+  await page.getByRole("textbox", { name: "Prompt to improve" }).fill("");
   await page.getByRole("link", { name: "Plan and build this project" }).click();
   await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+\/agents$/);
   await expect(

@@ -1,9 +1,11 @@
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from .models import InformationGap, Message, PromptAnalysis, PromptAnalysisDimension
+from .prompt_intent import contextual_gaps, is_small_talk
 
 ANALYSIS_VERSION = "prompt-analyzer-v1"
 THRESHOLDS = {"Poor": (0, 49), "Medium": (50, 79), "Good": (80, 100)}
@@ -44,16 +46,19 @@ class DimensionResult:
 def classify_task(text: str) -> str:
     lowered = text.lower()
     rules = {
-        "software_development": ("build", "website", "app", "api", "code", "software"),
+        "software_development": ("website", "app", "api", "code", "software", "pos", "point of sale", "backend", "frontend"),
         "business_analysis": ("business", "market", "process", "stakeholder"),
-        "data_analysis": ("data", "dataset", "分析", "dashboard", "csv"),
+        "data_analysis": ("data", "dataset", "分析", "dashboard", "csv", "numbers", "spreadsheet"),
         "marketing": ("marketing", "campaign", "customer", "seo", "advertise"),
         "education": ("teach", "lesson", "course", "student", "learn"),
         "writing": ("write", "article", "essay", "blog", "story"),
         "research": ("research", "study", "literature", "investigate"),
     }
     return next(
-        (category for category, words in rules.items() if any(word in lowered for word in words)),
+        (category for category, words in rules.items() if any(
+            (word in lowered if word == "分析" else re.search(r"\b" + re.escape(word) + r"\b", lowered))
+            for word in words
+        )),
         "general",
     )
 
@@ -76,7 +81,7 @@ def analyze_message(
         token in lowered for token in ("must", "use ", "under ", "within ", "avoid", "format")
     )
     has_output = any(
-        token in lowered for token in ("as a ", "format", "deliver", "return", "report", "document")
+        token in lowered for token in ("as a ", "format", "deliver", "return", "report", "document", "table", "bullet", "json", "email", "poem", "code", "steps")
     )
     applicable_audience = (
         category not in {"software_development", "data_analysis"}
@@ -181,40 +186,14 @@ def analyze_message(
     ]
     applicable = [item for item in dimensions if item.applicable and item.score is not None]
     score = round(sum(item.score or 0 for item in applicable) / len(applicable))
-    gaps: list[dict[str, str]] = []
-    if not has_constraints and category == "software_development":
-        gaps.append(
-            {
-                "dimension": "constraints",
-                "title": "Technology and constraints",
-                "description": "The implementation technologies, limitations, or deployment expectations are not specified.",
-                "severity": "critical",
-                "importance": "critical",
-                "question_target": "Which technologies, constraints, and deployment requirements should be used?",
-            }
-        )
-    if not has_output:
-        gaps.append(
-            {
-                "dimension": "output",
-                "title": "Expected output",
-                "description": "The form of the result is not specified.",
-                "severity": "important",
-                "importance": "important",
-                "question_target": "What should the completed result look like?",
-            }
-        )
-    if not has_constraints and category != "software_development":
-        gaps.append(
-            {
-                "dimension": "constraints",
-                "title": "Constraints",
-                "description": "Relevant limits or preferences have not been provided.",
-                "severity": "optional",
-                "importance": "optional",
-                "question_target": "Are there important constraints, limits, or preferences?",
-            }
-        )
+    gaps = contextual_gaps(text, category, has_output, has_constraints)
+    if is_small_talk(text) and not context.strip():
+        score = 0
+        dimensions = [DimensionResult(item.key, 0 if item.applicable else None,
+                                      "missing" if item.applicable else "not_applicable",
+                                      item.applicable, None,
+                                      "A greeting or reaction does not specify a task.")
+                      for item in dimensions]
     analysis = PromptAnalysis(
         project_id=project_id,
         conversation_id=conversation_id,
