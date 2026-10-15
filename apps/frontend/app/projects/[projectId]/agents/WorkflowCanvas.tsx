@@ -48,6 +48,7 @@ export function WorkflowCanvas({
   const [pan, setPan] = useState({ x: 24, y: 50 });
   const view = useRef<HTMLDivElement>(null);
   const arrangedVersion = useRef(0);
+  const visibleSelection = useRef<string | null>(null);
   const dragging = useRef<{
     id: string | null;
     x: number;
@@ -79,6 +80,29 @@ export function WorkflowCanvas({
     localStorage.setItem(key, JSON.stringify(defaults));
     setPan({ x: 24, y: 50 });
   }, [layoutVersion, key, tasks]);
+  useEffect(() => {
+    if (!selectedId) {
+      visibleSelection.current = null;
+      return;
+    }
+    const point = positions[selectedId];
+    if (!point || selectedId === visibleSelection.current || !view.current)
+      return;
+    visibleSelection.current = selectedId;
+    const x = pan.x + (point.x + NODE_WIDTH / 2) * zoom;
+    const y = pan.y + (point.y + NODE_HEIGHT / 2) * zoom;
+    if (
+      x < 80 ||
+      x > view.current.clientWidth - 80 ||
+      y < 80 ||
+      y > view.current.clientHeight - 80
+    ) {
+      setPan({
+        x: view.current.clientWidth / 2 - (point.x + NODE_WIDTH / 2) * zoom,
+        y: view.current.clientHeight / 2 - (point.y + NODE_HEIGHT / 2) * zoom,
+      });
+    }
+  }, [selectedId, positions, pan, zoom]);
   function start(event: PointerEvent, id: string | null) {
     if (event.button !== 0) return;
     event.preventDefault();

@@ -166,6 +166,7 @@ class ProviderGateway:
                 {"role": "user", "content": instruction}
             ]
             body = {"model": self.model, "messages": messages}
+            body["max_completion_tokens" if self.name == "openai" else "max_tokens"] = 8192
             if structured:
                 body["response_format"] = {"type": "json_object"}
             payload = self._request("POST", f"{self.base_url}/chat/completions", body)

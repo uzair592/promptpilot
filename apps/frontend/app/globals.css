@@ -595,7 +595,7 @@ summary {
   display: flex;
   flex-direction: column;
   padding: 18px 12px 14px;
-  color: #667085;
+  color: #e9eaf0;
   background: #171821;
   border-right: 1px solid #252731;
 }
@@ -628,7 +628,7 @@ summary {
   letter-spacing: -0.01em;
 }
 .pilot-brand small {
-  color: #667085;
+  color: #8f93a3;
   font-size: 11px;
 }
 .new-chat-button {
@@ -640,7 +640,7 @@ summary {
   padding: 11px 13px;
   border: 1px solid #3b3e4b;
   border-radius: 10px;
-  color: #667085;
+  color: #f4f4f7;
   background: #23252f;
   font-weight: 600;
 }
@@ -673,7 +673,7 @@ summary {
   min-width: 0;
   padding: 9px 10px;
   overflow: hidden;
-  color: #667085;
+  color: #aeb1bf;
   background: transparent;
   border-radius: 8px;
   text-align: left;
@@ -736,7 +736,7 @@ summary {
   font-size: 22px;
 }
 .agent-stat span {
-  color: #667085;
+  color: #7d8493;
   font-size: 10px;
   text-transform: uppercase;
 }
@@ -849,7 +849,7 @@ summary {
   white-space: nowrap;
 }
 .connection-row small {
-  color: #667085;
+  color: #818897;
   font-size: 9px;
 }
 .connection-row button {
@@ -877,7 +877,7 @@ summary {
   background: #16806a;
 }
 .empty-copy {
-  color: #667085;
+  color: #8a909d;
   font-size: 11px;
 }
 .agent-board {
@@ -963,7 +963,7 @@ summary {
   font-size: 11px;
 }
 .milestone-heading time {
-  color: #667085;
+  color: #888e9a;
   font-size: 10px;
 }
 .task-list {
@@ -1009,7 +1009,7 @@ summary {
   font-size: 11px;
 }
 .agent-task small {
-  color: #667085;
+  color: #8a909d;
   font-size: 9px;
 }
 .task-actions {
@@ -1089,7 +1089,7 @@ summary {
   height: 20px;
   margin-left: auto;
   border-radius: 999px;
-  color: #667085;
+  color: #d9d3ff;
   background: #454050;
   font-size: 10px;
 }
@@ -1109,7 +1109,7 @@ summary {
   padding: 12px 10px 2px;
   overflow: hidden;
   border-top: 1px solid #2b2d37;
-  color: #667085;
+  color: #969aa9;
   font-size: 11px;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -1124,7 +1124,7 @@ summary {
 }
 .sidebar-footer button {
   padding: 6px 0;
-  color: #667085;
+  color: #8f93a3;
   background: transparent;
   text-align: left;
   font-size: 10px;
@@ -1140,7 +1140,7 @@ summary {
   color: #313a4c;
 }
 .workspace-opening small {
-  color: #667085;
+  color: #7c8494;
 }
 .status-dot {
   width: 7px;
@@ -1284,7 +1284,7 @@ summary {
 .message-body > strong:first-child {
   display: block;
   margin-bottom: 5px;
-  color: #667085;
+  color: #778094;
   font-size: 11px;
 }
 .message-body p {
@@ -1422,7 +1422,7 @@ summary {
 .clarification-answer small {
   display: block;
   margin-bottom: 5px;
-  color: #667085;
+  color: #817aa9;
   font-size: 9px;
 }
 .answer-saved {
@@ -1500,7 +1500,7 @@ summary {
   font-size: 12px;
 }
 .model-recommendation-heading span {
-  color: #667085;
+  color: #8a91a0;
   font-size: 9px;
 }
 .model-recommendation-list {
@@ -1553,7 +1553,7 @@ summary {
 .run-message > small,
 .assistant-card > small,
 .result-heading > small {
-  color: #667085;
+  color: #7b8394;
   font-size: 10px;
 }
 .run-failed {
@@ -1691,7 +1691,7 @@ summary {
 .bottom-composer > small {
   display: block;
   margin-top: 6px;
-  color: #667085;
+  color: #9aa0ae;
   text-align: center;
   font-size: 9px;
 }
@@ -1802,7 +1802,7 @@ summary {
   font-size: 11px;
 }
 .criteria-list small {
-  color: #667085;
+  color: #858c9a;
   font-size: 9px;
   line-height: 1.35;
 }
@@ -1866,7 +1866,7 @@ summary {
   font-size: 11px;
 }
 .source-upload small {
-  color: #667085;
+  color: #979daa;
   font-size: 9px;
 }
 .source-upload input {
@@ -1886,7 +1886,7 @@ summary {
   margin-top: 18px;
 }
 .source-list > p {
-  color: #667085;
+  color: #8b92a0;
   font-size: 10px;
   line-height: 1.5;
 }
@@ -1910,7 +1910,7 @@ summary {
   white-space: nowrap;
 }
 .source-list small {
-  color: #667085;
+  color: #8b92a0;
   font-size: 9px;
 }
 @media (max-width: 1080px) {
@@ -2164,7 +2164,7 @@ summary {
   display: flex;
   flex-direction: column;
   padding: 24px 14px 18px;
-  color: #667085;
+  color: #b8bdce;
   background: #1b1e28;
   border-right: 1px solid #292d39;
 }
@@ -2173,7 +2173,7 @@ summary {
   align-items: center;
   gap: 10px;
   padding: 0 8px 20px;
-  color: #667085;
+  color: #f5f6fb;
   text-decoration: none;
   font-size: 16px;
   font-weight: 700;
@@ -2192,7 +2192,7 @@ summary {
 .workflow-brand small {
   display: block;
   margin-top: 3px;
-  color: #667085;
+  color: #969db3;
   font-size: 10px;
   font-weight: 400;
   letter-spacing: 0.02em;
@@ -2200,7 +2200,7 @@ summary {
 .workflow-back {
   display: block;
   padding: 12px 8px 20px;
-  color: #667085;
+  color: #a1a8bf;
   font-size: 12px;
   text-decoration: none;
   border-bottom: 1px solid #2d3140;
@@ -2209,7 +2209,7 @@ summary {
   display: flex;
   justify-content: space-between;
   margin: 25px 10px 10px;
-  color: #667085;
+  color: #969db3;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -2220,7 +2220,7 @@ summary {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #667085;
+  color: #d7dbeb;
 }
 .workflow-new {
   margin: 18px 0 0;
@@ -2228,7 +2228,7 @@ summary {
   border: 1px solid #474459;
   border-radius: 9px;
   padding: 11px;
-  color: #667085;
+  color: #ece9ff;
   background: #302b46;
   font-size: 12px;
   text-align: left;
@@ -2244,7 +2244,7 @@ summary {
   gap: 10px;
   width: 100%;
   padding: 12px 10px;
-  color: #667085;
+  color: #aab2c9;
   background: transparent;
   border: 0;
   border-radius: 9px;
@@ -2255,7 +2255,7 @@ summary {
 .workflow-plan-list button.selected,
 .workflow-plan-list button:hover {
   background: #2b2f3d;
-  color: #667085;
+  color: #f4f5fa;
 }
 .workflow-plan-list button div {
   min-width: 0;
@@ -2281,7 +2281,7 @@ summary {
   align-items: center;
   gap: 7px;
   padding: 9px 8px;
-  color: #667085;
+  color: #aab3cb;
   background: transparent;
   border: 0;
   font-size: 12px;
@@ -2309,6 +2309,7 @@ summary {
 }
 .workflow-main {
   display: flex;
+  padding: 0;
   flex-direction: column;
   flex: 1;
   min-width: 0;
@@ -2325,6 +2326,7 @@ summary {
   background: #fff;
 }
 .workflow-heading {
+  display: block;
   flex: 1;
   min-width: 0;
 }

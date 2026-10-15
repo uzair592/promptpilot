@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -45,7 +46,7 @@ class DimensionResult:
 def classify_task(text: str) -> str:
     lowered = text.lower()
     rules = {
-        "software_development": ("build", "website", "app", "api", "code", "software"),
+        "software_development": ("website", "app", "api", "code", "software", "pos", "point of sale", "backend", "frontend"),
         "business_analysis": ("business", "market", "process", "stakeholder"),
         "data_analysis": ("data", "dataset", "分析", "dashboard", "csv", "numbers", "spreadsheet"),
         "marketing": ("marketing", "campaign", "customer", "seo", "advertise"),
@@ -54,7 +55,10 @@ def classify_task(text: str) -> str:
         "research": ("research", "study", "literature", "investigate"),
     }
     return next(
-        (category for category, words in rules.items() if any(word in lowered for word in words)),
+        (category for category, words in rules.items() if any(
+            (word in lowered if word == "分析" else re.search(r"\b" + re.escape(word) + r"\b", lowered))
+            for word in words
+        )),
         "general",
     )
 

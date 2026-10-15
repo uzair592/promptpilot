@@ -102,6 +102,7 @@ export function ConnectionVault({
           <label>
             Provider
             <select
+              aria-label="Provider"
               value={provider}
               onChange={(event) => changeProvider(event.target.value)}
             >
@@ -163,7 +164,12 @@ export function ConnectionVault({
                   ...(provider === "custom" ? { base_url: baseUrl } : {}),
                 });
                 setModels(result.models);
-                if (!model && result.models.length) setModel(result.models[0]);
+                if (
+                  result.models.length &&
+                  !result.models.includes(model) &&
+                  !["openrouter/free", "openrouter/auto"].includes(model)
+                )
+                  setModel(result.models[0]);
                 setNotice(
                   `Loaded ${result.models.length} models. Choose a text model below.`,
                 );

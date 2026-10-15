@@ -82,7 +82,7 @@ Remove-Variable secret, pointer
 The one-command launcher inherits these variables. Provider credentials remain
 backend-only; do not prefix them with `NEXT_PUBLIC_`.
 
-Analysis and clarification have deterministic offline paths. Prompt generation and target-model execution require server-side provider configuration (`LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, and `LLM_API_KEY`). When unavailable, the UI reports that state and does not manufacture a model response. Heuristic evaluation can compare compatible persisted runs without a judge provider; an LLM-judge method requires its configured provider.
+Analysis and clarification have deterministic offline paths. For prompt generation and target-model execution, connect a provider in **Model Vault** or configure the backend's `LLM_*` environment variables. When no provider is available, the UI reports that state and does not manufacture a model response. Heuristic evaluation can compare compatible persisted runs without a judge provider; an LLM-judge method requires its configured provider.
 
 ## Multi-model AI delivery team
 
@@ -101,7 +101,7 @@ nodes can use different models from the same connection. Saved connections also
 power the prompt-improvement chat through its **Chat model** selector.
 
 Open a project and select **AI delivery team** in the sidebar. A project owner or
-editor can connect OpenRouter, OpenAI, Anthropic, or Google Gemini, then turn a
+editor can connect any supported provider, then turn a
 product idea into ordered discovery, backend, frontend, testing, and release
 milestones. PromptPilot recommends an available provider for each role, allows a
 human to change the assignment, and runs a task only after **Run node** is

@@ -5,6 +5,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
+from promptpilot_backend.analyzer_service import classify_task
 from promptpilot_backend.db import SessionLocal
 from promptpilot_backend.llm_provider import ProviderUnavailable
 from promptpilot_backend.models import ProviderConnection
@@ -355,3 +356,24 @@ def test_connections_are_not_usable_by_another_account(client):
     assert client.get(f"/api/v1/projects/{project_id}/plans").status_code == 404
     with SessionLocal() as db:
         assert db.scalar(select(ProviderConnection)).encrypted_api_key != "example-not-live-key"
+
+
+def test_topic_classification_does_not_match_fragments_inside_words():
+    assert classify_task("Create a marketing plan for apples") == "marketing"
+    assert classify_task("Build a business process plan") == "business_analysis"
+    assert classify_task("Build a restaurant POS") == "software_development"
+
+
+def test_missing_model_is_reported_with_available_choices(client, monkeypatch):
+    workspace(client)
+    selected = connection(client)
+    monkeypatch.setattr(
+        "promptpilot_backend.orchestration_routes.test_provider_connection",
+        lambda _: ["new-model", "another-model"],
+    )
+    response = client.post(f"/api/v1/provider-connections/{selected}/test")
+    assert response.status_code == 422
+    assert "catalog" in response.json()["error"]["message"]
+    saved = client.get("/api/v1/provider-connections").json()["items"][0]
+    assert saved["status"] == "invalid"
+    assert saved["available_models"] == ["new-model", "another-model"]

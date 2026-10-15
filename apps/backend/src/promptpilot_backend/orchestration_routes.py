@@ -196,6 +196,22 @@ def test_connection(
     except HTTPException:
         record_connection_test(db, connection, "failed", "Connection test failed")
         raise
+    if (
+        models
+        and connection.default_model.removeprefix("models/") not in models
+        and not (
+            connection.provider == "openrouter"
+            and connection.default_model in {"openrouter/free", "openrouter/auto"}
+        )
+    ):
+        record_connection_test(
+            db, connection, "failed", "Choose a model from the available catalog", models
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="The selected model is not in this provider's catalog. "
+            "Choose an available model and test again.",
+        )
     record_connection_test(
         db, connection, "passed", f"Connected; {len(models)} models visible", models
     )

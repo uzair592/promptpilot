@@ -29,11 +29,21 @@ test("edits a persisted workflow, discovers provider options, and validates repo
     .fill(
       "Build a restaurant POS with inventory, kitchen tickets and thermal receipts.",
     );
+  const savedPlan = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/plans") &&
+      response.request().method() === "POST",
+  );
   await create
     .getByRole("button", { name: "Create milestones and tasks" })
     .click();
   await expect(page.getByLabel("Workflow canvas")).toBeVisible();
-  await expect(page.locator(".workflow-node")).toHaveCount(7);
+  const plan = await (await savedPlan).json();
+  const initialNodes = plan.milestones.reduce(
+    (count: number, phase: { tasks: unknown[] }) => count + phase.tasks.length,
+    0,
+  );
+  await expect(page.locator(".workflow-node")).toHaveCount(initialNodes);
   await page
     .getByRole("button", {
       name: "Configure Define product requirements",
@@ -76,7 +86,7 @@ test("edits a persisted workflow, discovers provider options, and validates repo
     .fill("Check 80mm receipt readability and PKR totals.");
   await add.getByLabel("Role").selectOption("tester");
   await add.getByRole("button", { name: "Add node", exact: true }).click();
-  await expect(page.locator(".workflow-node")).toHaveCount(8);
+  await expect(page.locator(".workflow-node")).toHaveCount(initialNodes + 1);
   await expect(inspector.getByLabel("Task name")).toHaveValue(
     "Audit thermal receipt layout",
   );
@@ -97,7 +107,7 @@ test("edits a persisted workflow, discovers provider options, and validates repo
   await inspector
     .getByRole("button", { name: "Remove node", exact: true })
     .click();
-  await expect(page.locator(".workflow-node")).toHaveCount(7);
+  await expect(page.locator(".workflow-node")).toHaveCount(initialNodes);
   await page.getByRole("button", { name: "Fit workflow" }).click();
   await page.screenshot({
     path: "test-results/screenshots/visual-workflow.png",

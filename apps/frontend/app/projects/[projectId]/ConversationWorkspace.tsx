@@ -697,7 +697,9 @@ export function ConversationWorkspace({
                 );
               }}
             >
-              <option value="">Auto · connected model</option>
+              <option value="">
+                Auto · {connections.at(-1)?.default_model || "backend model"}
+              </option>
               {connections.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.label} · {item.default_model}
@@ -817,7 +819,9 @@ export function ConversationWorkspace({
                     <p>
                       {busy === "generate"
                         ? "Using your prompt and saved answers."
-                        : "Your answers are saved. Check the error below or choose another connected model before retrying."}
+                        : error
+                          ? "Your answers are saved. The error below explains what needs attention."
+                          : "Continue generation with your saved prompt and answers."}
                     </p>
                     <button
                       type="button"

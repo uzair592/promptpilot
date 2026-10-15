@@ -128,7 +128,10 @@ test("registers, completes, and restores the persistent product workflow", async
   await page.getByRole("button", { name: "Improve prompt" }).click();
   expect((await savedRequest).status()).toBe(201);
   await expect(
-    page.getByText("Create a clear, concise plan", { exact: false }),
+    page.getByText(
+      "Create a clear, concise plan for launching a community workshop.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(page.getByText(/I found \d+ area/)).toBeVisible();
 
@@ -197,7 +200,10 @@ test("registers, completes, and restores the persistent product workflow", async
 
   await page.reload();
   await expect(
-    page.getByText("Create a clear, concise plan", { exact: false }),
+    page.getByText(
+      "Create a clear, concise plan for launching a community workshop.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await expect(promptReady).toBeVisible();
   await expect(page.getByText(/Local deterministic response/)).toHaveCount(2);
