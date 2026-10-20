@@ -134,9 +134,9 @@ test("Model Vault includes Grok and custom APIs and the GitHub form accepts repo
     .click();
   await page
     .locator(".workflow-top-actions")
-    .getByRole("button", { name: /Model Vault/ })
+    .getByRole("button", { name: "Models & API keys", exact: true })
     .click();
-  const vault = page.getByRole("dialog", { name: "Model Vault" });
+  const vault = page.locator(".models-page");
   await vault.getByLabel("Provider", { exact: true }).selectOption("grok");
   await expect(vault.getByLabel("Default model")).toBeVisible();
   await vault.getByLabel("Provider", { exact: true }).selectOption("custom");
@@ -145,7 +145,6 @@ test("Model Vault includes Grok and custom APIs and the GitHub form accepts repo
     path: "test-results/screenshots/model-vault.png",
     fullPage: true,
   });
-  await vault.getByRole("button", { name: "Close Model Vault" }).click();
   await page
     .getByRole("button", { name: "Connect GitHub", exact: true })
     .click();

@@ -133,7 +133,9 @@ def submit_answer(
         ProjectMemoryService().add_user_answer(
             db, session.project_id, question.text, answer.content
         )
-        analysis = reanalyze_after_answer(db, session, answer)
+        analysis = reanalyze_after_answer(
+            db, session, answer, provider=chat_provider(db, user.id, payload.connection_id)
+        )
     question = next_question(db, session, provider=chat_provider(db, user.id, payload.connection_id))
     return QuestionSessionResponse(
         id=session.id,
@@ -146,6 +148,35 @@ def submit_answer(
             ProjectMemoryResponse.model_validate(item)
             for item in ProjectMemoryService().active(db, session.project_id)
         ],
+    )
+
+
+@router.post("/questions/reassess", response_model=QuestionSessionResponse)
+def reassess_questions(
+    conversation_id: UUID,
+    message_id: UUID,
+    connection_id: UUID | None = None,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> QuestionSessionResponse:
+    session = authorized_session(
+        db, conversation_id, user, ProjectRole.EDITOR, message_id=message_id
+    )
+    provider = chat_provider(db, user.id, connection_id)
+    analysis = reanalyze_after_answer(db, session, None, provider, force_semantic=True)
+    for pending in db.scalars(select(Question).where(
+        Question.session_id == session.id, Question.status == "presented"
+    )):
+        pending.status = "obsolete"
+    session.status = "active"
+    session.stop_reason = None
+    db.commit()
+    question = next_question(db, session, provider=provider)
+    return QuestionSessionResponse(
+        id=session.id, status=session.status, stop_reason=session.stop_reason,
+        analysis=PromptAnalysisResponse.model_validate(analysis),
+        next_question=QuestionResponse.model_validate(question) if question else None,
+        answered_questions=answered_questions(db, session),
     )
 
 

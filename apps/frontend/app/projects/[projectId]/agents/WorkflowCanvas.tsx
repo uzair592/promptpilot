@@ -18,7 +18,7 @@ export const roleNames: Record<AgentTask["role"], string> = {
   api: "API design",
   tester: "QA review",
 };
-const roleMarks: Record<AgentTask["role"], string> = {
+export const roleMarks: Record<AgentTask["role"], string> = {
   orchestrator: "TL",
   product_manager: "PM",
   researcher: "R",

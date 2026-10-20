@@ -25,6 +25,7 @@ from .orchestration_service import (
     plan_response,
     provider_response,
     record_connection_test,
+    replace_provider_key,
     run_response,
     task_response,
     test_provider_connection,
@@ -86,9 +87,10 @@ def update_connection(
     db: Session = Depends(get_db),
 ) -> ProviderConnectionResponse:
     connection = user_connection(db, connection_id, user.id)
-    if not payload.default_model.strip():
-        raise HTTPException(status_code=422, detail="Model must not be blank")
-    connection.default_model = payload.default_model.strip().removeprefix("models/")
+    if payload.default_model is not None:
+        connection.default_model = payload.default_model.removeprefix("models/")
+    if payload.api_key is not None:
+        replace_provider_key(connection, payload.api_key)
     db.commit()
     return provider_response(connection)
 
@@ -193,8 +195,8 @@ def test_connection(
     connection = user_connection(db, connection_id, user.id)
     try:
         models = test_provider_connection(connection)
-    except HTTPException:
-        record_connection_test(db, connection, "failed", "Connection test failed")
+    except HTTPException as error:
+        record_connection_test(db, connection, "failed", str(error.detail))
         raise
     if (
         models

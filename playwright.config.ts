@@ -39,7 +39,7 @@ export default defineConfig({
       env: { PROMPTPILOT_FAKE_PROVIDER_PORT: "8132" },
     },
     {
-      command: `"${python}" -m uvicorn promptpilot_backend.main:app --host 127.0.0.1 --port 8130`,
+      command: `"${python}" ../../tests/acceptance/serve_backend.py`,
       cwd: "./apps/backend",
       url: "http://127.0.0.1:8130/docs",
       reuseExistingServer: false,

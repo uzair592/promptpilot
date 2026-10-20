@@ -1,11 +1,15 @@
+# Application imports must follow this process's isolated test environment setup.
+# ruff: noqa: E402
 import copy
 import json
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import NamedTuple
 from uuid import UUID
 
-os.environ["DATABASE_URL"] = "sqlite:///./test-promptpilot.db"
+_test_directory = TemporaryDirectory(prefix="promptpilot-tests-")
+os.environ["DATABASE_URL"] = f"sqlite:///{Path(_test_directory.name, 'test.db').as_posix()}"
 os.environ["SESSION_COOKIE_NAME"] = "promptpilot_test_session"
 os.environ["PROVIDER_KEY_ENCRYPTION_KEY"] = (
     "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
@@ -31,12 +35,21 @@ from promptpilot_backend.production_benchmark_protocol import (
 )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolated_test_database():
+    yield
+    engine.dispose()
+    _test_directory.cleanup()
+
+
 @pytest.fixture()
 def client():
+    engine.dispose()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     with TestClient(app) as test_client:
         yield test_client
+    engine.dispose()
     Base.metadata.drop_all(bind=engine)
 
 

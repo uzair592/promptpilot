@@ -261,6 +261,17 @@ def decrypt_api_key(connection: ProviderConnection) -> str:
         ) from error
 
 
+def replace_provider_key(connection: ProviderConnection, api_key: str) -> None:
+    api_key = api_key.strip()
+    connection.encrypted_api_key = _cipher().encrypt(api_key.encode()).decode()
+    connection.key_fingerprint = hashlib.sha256(api_key.encode()).hexdigest()
+    connection.key_last_four = api_key[-4:]
+    connection.status = "untested"
+    connection.last_test_status = None
+    connection.last_test_message = None
+    connection.last_tested_at = None
+
+
 def user_connection(db: Session, connection_id: UUID, user_id: UUID) -> ProviderConnection:
     connection = db.scalar(
         select(ProviderConnection).where(

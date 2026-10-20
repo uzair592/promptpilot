@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .analyzer_service import AnalysisInput, analyze_input
+from .analyzer_v2 import AnalysisProvider, analyze_hybrid
 from .config import get_settings
 from .llm_provider import OpenAICompatibleProvider, ProviderUnavailable
 from .memory_service import ProjectMemoryService
@@ -104,7 +105,7 @@ def next_question(
     session_questions = list(
         db.scalars(select(Question).where(Question.session_id == session.id)).all()
     )
-    if len(session_questions) >= 3:
+    if sum(item.status != "obsolete" for item in session_questions) >= 3:
         session.status = "completed"
         session.stop_reason = "clarification_limit"
         db.commit()
@@ -263,7 +264,13 @@ def answer_question(db: Session, question: Question, content: str) -> Answer:
     return answer
 
 
-def reanalyze_after_answer(db: Session, session: QuestionSession, answer: Answer) -> PromptAnalysis:
+def reanalyze_after_answer(
+    db: Session,
+    session: QuestionSession,
+    answer: Answer | None,
+    provider: AnalysisProvider | None = None,
+    *, force_semantic: bool = False,
+) -> PromptAnalysis:
     previous = db.get(PromptAnalysis, session.latest_analysis_id or session.analysis_id)
     if previous is None:
         raise ValueError("Question session analysis is missing")
@@ -287,8 +294,28 @@ def reanalyze_after_answer(db: Session, session: QuestionSession, answer: Answer
     analysis = analyze_input(
         db, previous.project_id, previous.conversation_id, input_value, original.id
     )
+    if provider is not None and (
+        force_semantic or previous.analysis_mode != "baseline" or previous.fallback_used
+    ):
+        analysis = analyze_hybrid(
+            db,
+            previous.project_id,
+            previous.conversation_id,
+            original,
+            provider=provider,
+            baseline=analysis,
+            adaptive_clarification=True,
+            analysis_context=json.dumps({
+                "original_prompt": original.content,
+                "clarification_answers": [
+                    {"question": question.text, "answer": item.content}
+                    for item, question, _ in answers
+                ],
+                "project_memory": list(input_value.memory_items),
+            }),
+        )
     session.latest_analysis_id = analysis.id
-    answered_question = db.get(Question, answer.question_id)
+    answered_question = db.get(Question, answer.question_id) if answer is not None else None
     old_gap = db.get(InformationGap, answered_question.gap_id) if answered_question else None
     if old_gap:
         old_gap.status = "resolved"
@@ -300,7 +327,7 @@ def reanalyze_after_answer(db: Session, session: QuestionSession, answer: Answer
     # it does not contain a keyword the baseline analyzer recognizes.
     evidence = {gap.dimension: item.content for item, _, gap in answers}
     for dimension in analysis.dimensions:
-        if dimension.key in evidence:
+        if dimension.key in evidence and not analysis.ai_succeeded:
             dimension.evidence = evidence[dimension.key]
             dimension.status = "present"
             dimension.score = max(dimension.score or 0, 70)

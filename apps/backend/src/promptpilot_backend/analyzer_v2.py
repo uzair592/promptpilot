@@ -33,7 +33,10 @@ class AnalysisProvider(Protocol):
 class AnalysisReconciler:
     """Merge validated semantic findings while keeping scoring deterministic."""
 
-    def reconcile(self, baseline: PromptAnalysis, ai_result: AIAnalysis) -> PromptAnalysis:
+    def reconcile(
+        self, baseline: PromptAnalysis, ai_result: AIAnalysis,
+        *, adaptive_clarification: bool = False,
+    ) -> PromptAnalysis:
         if ai_result.task_category:
             baseline.task_category = ai_result.task_category
         for dimension in baseline.dimensions:
@@ -45,14 +48,27 @@ class AnalysisReconciler:
             dimension.status = ai_dimension.status
             dimension.evidence = ai_dimension.evidence or dimension.evidence
             dimension.explanation = ai_dimension.explanation or dimension.explanation
-        existing = {(gap.dimension, gap.title.lower()) for gap in baseline.gaps}
+        existing = {(gap.dimension, gap.title.lower()): gap for gap in baseline.gaps}
+        # Interactive v3 clarification trusts the model's complete gap list.
+        # Frozen benchmark callers retain the versioned v2 reconciliation policy.
         for baseline_gap in baseline.gaps:
             finding = ai_result.dimensions.get(baseline_gap.dimension)
-            if finding and finding.applicable and finding.score is not None and finding.score >= 80:
+            if adaptive_clarification or (
+                finding and finding.applicable and finding.score is not None
+                and finding.score >= 80
+            ):
                 baseline_gap.status = "resolved"
         for gap in ai_result.information_gaps:
             key = (gap.dimension, gap.title.lower())
             if key in existing:
+                if not adaptive_clarification:
+                    continue
+                matched = existing[key]
+                matched.description = gap.description
+                matched.severity = gap.severity
+                matched.importance = gap.importance
+                matched.question_target = gap.question_target
+                matched.status = "unresolved"
                 continue
             baseline.gaps.append(
                 InformationGap(
@@ -65,7 +81,7 @@ class AnalysisReconciler:
                     status="unresolved",
                 )
             )
-            existing.add(key)
+            existing[key] = baseline.gaps[-1]
         applicable = [
             item for item in baseline.dimensions if item.applicable and item.score is not None
         ]
@@ -90,13 +106,21 @@ def analyze_hybrid(
     mode: str = "hybrid",
     provider: AnalysisProvider | None = None,
     observer: ProviderObserver | None = None,
+    *,
+    analysis_context: str | None = None,
+    baseline: PromptAnalysis | None = None,
+    adaptive_clarification: bool = False,
 ) -> PromptAnalysis:
     if mode not in {"baseline", "ai", "hybrid"}:
         mode = "hybrid"
     if is_small_talk(message.content):
         mode = "baseline"
-    result = analyze_message(db, project_id, conversation_id, message)
-    result.analysis_version = "prompt-analyzer-v2" if mode != "baseline" else "prompt-analyzer-v1"
+    result = baseline if baseline is not None else analyze_message(
+        db, project_id, conversation_id, message
+    )
+    result.analysis_version = (
+        "prompt-analyzer-v3" if adaptive_clarification else "prompt-analyzer-v2"
+    ) if mode != "baseline" else "prompt-analyzer-v1"
     result.analysis_mode = "baseline"
     result.ai_succeeded = False
     result.fallback_used = mode != "baseline"
@@ -135,9 +159,10 @@ def analyze_hybrid(
         else:
             started_at = datetime.now(UTC)
             start = perf_counter()
-            request_hash = sanitized_request_hash("analysis", model_name, message.content)
+            semantic_input = analysis_context or message.content
+            request_hash = sanitized_request_hash("analysis", model_name, semantic_input)
             try:
-                ai_result = active_provider.analyze(message.content)
+                ai_result = active_provider.analyze(semantic_input)
             except Exception as error:
                 finished_at = datetime.now(UTC)
                 handled = isinstance(error, (ProviderUnavailable, ProviderConfigurationError))
@@ -164,7 +189,11 @@ def analyze_hybrid(
             else:
                 finished_at = datetime.now(UTC)
                 try:
-                    AnalysisReconciler().reconcile(result, ai_result)
+                    reconciler = AnalysisReconciler()
+                    if adaptive_clarification:
+                        reconciler.reconcile(result, ai_result, adaptive_clarification=True)
+                    else:
+                        reconciler.reconcile(result, ai_result)
                 except Exception as error:
                     notify_observer(
                         observer,

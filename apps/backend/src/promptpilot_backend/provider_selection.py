@@ -25,7 +25,9 @@ def chat_provider(
     )
     if connection is not None:
         if connection.status != "active":
-            raise HTTPException(status_code=409, detail="Test this connection in Model Vault first")
+            raise HTTPException(
+                status_code=409, detail="Test this connection in Models & API keys first"
+            )
         return ProviderGateway(
             connection.provider,
             connection.default_model,

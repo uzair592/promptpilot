@@ -413,6 +413,15 @@ export const answerQuestion = (
       body: JSON.stringify({ content, connection_id: connectionId }),
     },
   );
+export const reassessQuestions = (
+  conversationId: string,
+  messageId: string,
+  connectionId?: string,
+) =>
+  api<QuestionSession>(
+    `/api/v1/conversations/${conversationId}/questions/reassess?${new URLSearchParams({ message_id: messageId, ...(connectionId ? { connection_id: connectionId } : {}) })}`,
+    { method: "POST" },
+  );
 export const skipQuestion = (
   conversationId: string,
   questionId: string,
