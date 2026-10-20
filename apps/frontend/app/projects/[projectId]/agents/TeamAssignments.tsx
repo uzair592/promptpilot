@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import { ModelPicker } from "../../../../components/ModelPicker";
 import { AgentTask, ProviderConnection } from "../../../../lib/orchestration";
-import { roleNames } from "./WorkflowCanvas";
+import { roleMarks, roleNames } from "./WorkflowCanvas";
 
 export function TeamAssignments({
   tasks,
@@ -171,7 +171,7 @@ function AssignmentCard({
     >
       <header>
         <span className={`team-role-icon role-icon-${task.role}`}>
-          {roleNames[task.role].slice(0, 2).toUpperCase()}
+          {roleMarks[task.role]}
         </span>
         <div>
           <small>{roleNames[task.role]}</small>

@@ -13,6 +13,16 @@ test("connects a key, uses adaptive questions, assigns different models and save
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+$/);
   const projectId = page.url().split("/").pop()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".chat-connect-banner")).toBeVisible();
+  const composer = await page.locator(".bottom-composer").boundingBox();
+  expect(composer).not.toBeNull();
+  expect(composer!.y + composer!.height).toBeLessThanOrEqual(845);
+  await page.screenshot({
+    path: "test-results/screenshots/chat-mobile.png",
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Open models and API keys" }).click();
   const dialog = page.getByRole("dialog", { name: "Models & API keys" });
   await dialog.getByLabel("Provider", { exact: true }).selectOption("gemini");
@@ -77,6 +87,11 @@ test("connects a key, uses adaptive questions, assigns different models and save
     "kitchen display with an audible alert",
   );
   await expect(page.locator(".question-message")).toHaveCount(0);
+  const quality = await page.locator(".large-quality strong").innerText();
+  await expect(page.locator(".composer-quality")).toContainText(quality);
+  const heading = await page.locator(".chat-heading > strong").boundingBox();
+  const subtitle = await page.locator(".chat-heading > span").boundingBox();
+  expect(subtitle!.y).toBeGreaterThanOrEqual(heading!.y + heading!.height - 1);
   await page.screenshot({
     path: "test-results/screenshots/adaptive-chat.png",
     fullPage: true,

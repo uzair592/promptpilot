@@ -745,7 +745,7 @@ export function ConversationWorkspace({
           >
             ☰
           </button>
-          <div>
+          <div className="chat-heading">
             <strong>{selected?.title ?? "New chat"}</strong>
             <span>Prompt improvement assistant</span>
           </div>
@@ -972,9 +972,9 @@ export function ConversationWorkspace({
           )}
           <div className="composer-quality">
             <span
-              className={`quality-dot quality-${qualityTone(liveQuality.score)}`}
+              className={`quality-dot quality-${qualityTone(displayedScore)}`}
             />
-            {liveQuality.score}/100 · {liveQuality.label}
+            {displayedScore}/100 · {qualityLabel(displayedScore)}
           </div>
           <div className="composer-box">
             <textarea
@@ -1428,11 +1428,23 @@ function QualityPanel({
 }) {
   const score = analysis?.overall_score ?? quality.score;
   const gap = analysis?.gaps.find((item) => item.status !== "resolved");
+  const criteria = analysis
+    ? analysis.dimensions
+        .filter((item) => item.applicable && item.score !== null)
+        .map((item) => ({
+          key: item.key,
+          label: humanize(item.key),
+          score: item.score || 0,
+          maximum: 100,
+          present: item.status === "present",
+          suggestion: item.explanation,
+        }))
+    : quality.criteria;
   return (
     <div className="tool-panel-content">
       <div className="tool-panel-heading">
         <span>Prompt quality</span>
-        <small>Live</small>
+        <small>{analysis ? "Analyzed" : "Live"}</small>
       </div>
       <div className="large-quality">
         <QualityRing score={score} />
@@ -1442,11 +1454,12 @@ function QualityPanel({
         </div>
       </div>
       <p className="panel-intro">
-        A strong prompt clearly communicates the goal, context, limits,
-        audience, and expected output.
+        {analysis
+          ? "Completeness of your prompt and saved replies. The overall score averages the relevant areas below."
+          : "A live estimate as you type. A strong prompt gives the AI a clear goal and the context it needs."}
       </p>
       <div className="criteria-list">
-        {quality.criteria.map((criterion) => (
+        {criteria.map((criterion) => (
           <div key={criterion.key}>
             <span
               className={
@@ -1458,7 +1471,11 @@ function QualityPanel({
             <div>
               <strong>{criterion.label}</strong>
               <small>
-                {criterion.present ? "Detected" : criterion.suggestion}
+                {analysis
+                  ? criterion.suggestion
+                  : criterion.present
+                    ? "Detected"
+                    : criterion.suggestion}
               </small>
             </div>
             <b>

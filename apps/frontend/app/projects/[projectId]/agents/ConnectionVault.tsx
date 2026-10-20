@@ -328,7 +328,7 @@ export function ConnectionVault({
           <div className="vault-connections">
             {connections.map((item) => (
               <SavedConnection
-                key={item.id}
+                key={`${item.id}:${item.default_model}`}
                 item={item}
                 disabled={!canWrite || Boolean(busy)}
                 act={act}
