@@ -553,7 +553,17 @@ class ProviderTestResponse(BaseModel):
 
 
 class ProviderConnectionUpdateRequest(BaseModel):
-    default_model: str = Field(min_length=1, max_length=240)
+    default_model: str | None = Field(default=None, min_length=1, max_length=240)
+    api_key: str | None = Field(default=None, min_length=8, max_length=1000)
+
+    @field_validator("default_model", "api_key")
+    @classmethod
+    def connection_update_not_blank(cls, value: str | None) -> str | None:
+        if value is not None:
+            value = value.strip()
+            if not value:
+                raise ValueError("Value must not be blank")
+        return value
 
 
 class ProviderDiscoveryRequest(BaseModel):

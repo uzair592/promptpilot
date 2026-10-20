@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { ModelPicker } from "../../../../components/ModelPicker";
 import {
   AgentTask,
   ProviderConnection,
@@ -23,6 +24,8 @@ export function NodeInspector({
   onClose,
   onSave,
   onRun,
+  onSaveAndRun,
+  onConnect,
   onDelete,
   onPublish,
   onSaveDraft,
@@ -38,6 +41,8 @@ export function NodeInspector({
   onClose: () => void;
   onSave: (patch: Patch) => Promise<void>;
   onRun: () => void;
+  onSaveAndRun: (patch: Patch) => Promise<void>;
+  onConnect: () => void;
   onDelete: () => void;
   onPublish: () => void;
   onSaveDraft: (text: string) => void;
@@ -89,23 +94,31 @@ export function NodeInspector({
     };
   }, [task.id, task.status, task.attempt_count]);
   const selectedConnection = connections.find((item) => item.id === connection);
-  const blockers = task.dependencies
+  const blockers = dependencies
     .map((id) => tasks.find((item) => item.id === id))
     .filter((item) => !item || !["review", "completed"].includes(item.status));
   const editable = canWrite && !busy && task.status !== "running";
+  const patch: Patch = {
+    title,
+    description,
+    assigned_connection_id: connection || null,
+    assigned_model: model || null,
+    dependencies,
+    acceptance_criteria: criteria
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean),
+  };
+  const unsaved =
+    title !== task.title ||
+    description !== task.description ||
+    connection !== (task.assigned_connection_id || "") ||
+    model !== (task.assigned_model || "") ||
+    criteria !== task.acceptance_criteria.join("\n") ||
+    JSON.stringify(dependencies) !== JSON.stringify(task.dependencies);
   async function save(event: FormEvent) {
     event.preventDefault();
-    await onSave({
-      title,
-      description,
-      assigned_connection_id: connection || null,
-      assigned_model: model || null,
-      dependencies,
-      acceptance_criteria: criteria
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean),
-    });
+    await onSave(patch);
   }
   return (
     <aside className="node-inspector" aria-label="Node inspector">
@@ -167,6 +180,19 @@ export function NodeInspector({
               />
             </label>
             <div className="inspector-section-label">MODEL ASSIGNMENT</div>
+            <button
+              type="button"
+              className="inspector-connect-link"
+              onClick={onConnect}
+            >
+              ＋ Add a provider / API key
+            </button>
+            {!connections.some((item) => item.status === "active") && (
+              <p className="plan-connect-tip">
+                Connect an API key first, then choose its model here. Your
+                changes stay in this inspector while you connect.
+              </p>
+            )}
             <label>
               Provider connection
               <select
@@ -190,21 +216,14 @@ export function NodeInspector({
                   ))}
               </select>
             </label>
-            <label>
-              Model
-              <input
-                list={`models-${task.id}`}
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                placeholder="Choose or enter a model ID"
-                disabled={!editable || !connection}
-              />
-              <datalist id={`models-${task.id}`}>
-                {selectedConnection?.available_models?.map((item) => (
-                  <option value={item} key={item} />
-                ))}
-              </datalist>
-            </label>
+            <ModelPicker
+              key={connection}
+              label="Model"
+              models={selectedConnection?.available_models || []}
+              value={model}
+              onChange={setModel}
+              disabled={!editable || !connection}
+            />
             <p className="field-note">
               Different nodes can use different models with the same provider
               key.
@@ -381,8 +400,10 @@ export function NodeInspector({
         <small>
           {blockers.length
             ? `Waiting for ${blockers.length} prerequisite node${blockers.length === 1 ? "" : "s"}`
-            : task.assigned_model
-              ? "Ready when you are"
+            : model
+              ? unsaved
+                ? "Your changes will be saved before running"
+                : "Ready when you are"
               : "Assign a connected model first"}
         </small>
         <button
@@ -390,17 +411,21 @@ export function NodeInspector({
           disabled={
             busy ||
             !canWrite ||
-            !task.assigned_connection_id ||
+            !selectedConnection ||
+            selectedConnection.status !== "active" ||
+            !model.trim() ||
             blockers.length > 0 ||
             ["running", "completed", "cancelled"].includes(task.status)
           }
-          onClick={onRun}
+          onClick={() => (unsaved ? void onSaveAndRun(patch) : onRun())}
         >
           {task.status === "running"
             ? "Running…"
             : task.status === "failed"
               ? "Retry node"
-              : "Run node"}
+              : unsaved
+                ? "Save and run"
+                : "Run node"}
         </button>
       </footer>
     </aside>

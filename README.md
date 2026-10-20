@@ -71,7 +71,7 @@ a file:
 ```powershell
 $env:LLM_PROVIDER = "openrouter"
 $env:LLM_BASE_URL = "https://openrouter.ai/api/v1"
-$env:LLM_MODEL = "deepseek/deepseek-v4-flash-0731:free"
+$env:LLM_MODEL = "openrouter/free"
 $secret = Read-Host "OpenRouter API key" -AsSecureString
 $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret)
 try { $env:LLM_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer) }
@@ -82,7 +82,19 @@ Remove-Variable secret, pointer
 The one-command launcher inherits these variables. Provider credentials remain
 backend-only; do not prefix them with `NEXT_PUBLIC_`.
 
-Analysis and clarification have deterministic offline paths. For prompt generation and target-model execution, connect a provider in **Model Vault** or configure the backend's `LLM_*` environment variables. When no provider is available, the UI reports that state and does not manufacture a model response. Heuristic evaluation can compare compatible persisted runs without a judge provider; an LLM-judge method requires its configured provider.
+Analysis and clarification have deterministic offline paths. For prompt generation and target-model execution, connect a provider in **Models & API keys** or configure the backend's `LLM_*` environment variables. When no provider is available, the UI reports that state and does not manufacture a model response. Heuristic evaluation can compare compatible persisted runs without a judge provider; an LLM-judge method requires its configured provider.
+
+## Connect your model in the app
+
+1. Open **Models & API keys** from the chat sidebar or the AI delivery team’s top tabs.
+2. Choose your provider, paste its API key, and select **Load available models**.
+3. Choose a model from the visible dropdown and select **Save and connect**. The connection appears in the chat’s **Chat model** selector.
+4. In **AI delivery team → Team models**, assign a provider connection and model to each task. **Quick start** can fill all unassigned tasks with one model; each task can then use a different model.
+5. Open **Workflow**, select a node, and choose **Run node**. If its settings have changed, **Save and run** saves those changes before calling the model. Inspect **Output** and **Runs**, then approve the result or request changes.
+
+Saved connections have **Change API key** and **Save and test** controls. A rejected key or unavailable model shows an actionable error. Retrying a failed new connection updates that saved connection rather than creating duplicates.
+
+Interactive analysis uses the connected model’s task-specific gap list. After a reply, the model receives the original prompt and every saved question/answer pair before deciding whether another clarification is needed. Complete requests can proceed without questions. Without a working provider, questions are labelled **Offline suggestion**, with a direct link to model setup. After connecting, **Recheck with selected model** refreshes an existing offline session and preserves its saved replies. The frozen benchmark path retains its versioned v2 reconciliation policy; interactive analysis is labelled v3.
 
 ## Multi-model AI delivery team
 
@@ -93,7 +105,7 @@ approval, requests for changes, and review notes are saved with the task.
 Use **New workflow** to generate an idea-specific plan with a connected model or
 start with an editable template. **Add node** lets you extend the workflow.
 
-**Model Vault** loads its provider catalog from the backend. It supports OpenRouter,
+**Models & API keys** loads its provider catalog from the backend. It supports OpenRouter,
 OpenAI, Anthropic, Gemini, xAI/Grok, DeepSeek, Mistral, Groq, and public HTTPS
 OpenAI-compatible APIs through the Custom option. **Load available models** queries
 your provider's current model catalog; you can also enter a model ID. Different

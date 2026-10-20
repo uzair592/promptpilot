@@ -35,6 +35,7 @@ import {
   getNextQuestion,
   getRuns,
   renameConversation,
+  reassessQuestions,
   sendMessage,
   skipQuestion,
   uploadDocument,
@@ -47,8 +48,12 @@ import {
 import { recommendModels } from "../../../lib/model-recommendations";
 import {
   getProviderConnections,
+  getProviderCatalog,
   ProviderConnection,
+  ProviderDefinition,
 } from "../../../lib/orchestration";
+import { ConnectionVault } from "./agents/ConnectionVault";
+import { WorkspaceModal } from "./agents/WorkspaceModal";
 
 type ToolView = "quality" | "sources";
 
@@ -83,6 +88,12 @@ export function ConversationWorkspace({
   const [editTitle, setEditTitle] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [connections, setConnections] = useState<ProviderConnection[]>([]);
+  const [allConnections, setAllConnections] = useState<ProviderConnection[]>(
+    [],
+  );
+  const [catalog, setCatalog] = useState<ProviderDefinition[]>([]);
+  const [modelsOpen, setModelsOpen] = useState(false);
+  const [modelsError, setModelsError] = useState("");
   const [connectionId, setConnectionId] = useState("");
   const [introNotice, setIntroNotice] = useState("");
   const connectionRef = useRef<string | undefined>(undefined);
@@ -121,21 +132,42 @@ export function ConversationWorkspace({
     draft.trim() && !questions?.next_question ? null : analysis;
   const displayedScore = displayedAnalysis?.overall_score ?? liveQuality.score;
 
-  useEffect(() => {
-    getProviderConnections()
-      .then((items) => {
-        setConnections(items.filter((item) => item.status === "active"));
-        const stored = localStorage.getItem("promptpilot:chat-provider");
-        if (
-          stored &&
-          items.some((item) => item.id === stored && item.status === "active")
-        ) {
-          setConnectionId(stored);
-          connectionRef.current = stored;
-        }
-      })
-      .catch(() => undefined);
+  const refreshConnections = useCallback(async () => {
+    const items = await getProviderConnections();
+    setAllConnections(items);
+    setConnections(items.filter((item) => item.status === "active"));
+    const stored = localStorage.getItem("promptpilot:chat-provider");
+    if (
+      stored &&
+      items.some((item) => item.id === stored && item.status === "active")
+    ) {
+      setConnectionId(stored);
+      connectionRef.current = stored;
+    } else if (
+      connectionRef.current &&
+      !items.some(
+        (item) => item.id === connectionRef.current && item.status === "active",
+      )
+    ) {
+      setConnectionId("");
+      connectionRef.current = undefined;
+      localStorage.removeItem("promptpilot:chat-provider");
+    }
   }, []);
+  const closeModels = useCallback(() => setModelsOpen(false), []);
+  useEffect(() => {
+    void refreshConnections().catch(() => undefined);
+  }, [refreshConnections]);
+  useEffect(() => {
+    if (!modelsOpen) return;
+    setModelsError("");
+    void Promise.all([
+      refreshConnections(),
+      getProviderCatalog().then(setCatalog),
+    ]).catch((caught) =>
+      setModelsError(friendlyError(caught, "Could not load model settings.")),
+    );
+  }, [modelsOpen, refreshConnections]);
 
   const loadDocuments = useCallback(async () => {
     setDocuments(await getDocuments(projectId));
@@ -481,6 +513,35 @@ export function ConversationWorkspace({
     );
   }
 
+  async function reassessCurrentPrompt() {
+    if (!selected || !source) return;
+    if (draft.trim()) {
+      setError(
+        "Send your typed answer or clear the reply box before rechecking the questions. Your text has been kept.",
+      );
+      return;
+    }
+    await act(
+      "reassess",
+      async () => {
+        const session = await reassessQuestions(
+          selected.id,
+          source.id,
+          connectionRef.current,
+        );
+        setQuestions(session);
+        if (session.analysis) setAnalysis(session.analysis);
+        if (!session.analysis?.ai_succeeded)
+          throw new Error(
+            "The selected model could not recheck this prompt. Your replies are saved; check Models & API keys. The displayed question is an offline suggestion.",
+          );
+        if (!session.next_question)
+          await generateAfterSaving(selected.id, source.id);
+      },
+      "Could not recheck the prompt with this model. Your saved answers are still available.",
+    );
+  }
+
   async function regenerate() {
     if (!selected || !source) return;
     await act(
@@ -521,7 +582,7 @@ export function ConversationWorkspace({
           throw executionError;
         }
       },
-      "The configured AI model is unavailable. Check the server-side OpenRouter settings.",
+      "The selected AI model is unavailable. Check Models & API keys.",
     );
   }
 
@@ -581,6 +642,15 @@ export function ConversationWorkspace({
           >
             <span>✦</span> AI delivery team
           </a>
+          <button
+            onClick={() => {
+              setModelsOpen(true);
+              setSidebarOpen(false);
+            }}
+          >
+            <span>◈</span> Models & API keys{" "}
+            {connections.length > 0 && <b>{connections.length}</b>}
+          </button>
         </div>
         <div className="sidebar-section chat-history">
           <small>RECENT</small>
@@ -689,6 +759,10 @@ export function ConversationWorkspace({
               value={connectionId}
               disabled={Boolean(busy)}
               onChange={(event) => {
+                if (event.target.value === "connect") {
+                  setModelsOpen(true);
+                  return;
+                }
                 setConnectionId(event.target.value);
                 connectionRef.current = event.target.value || undefined;
                 localStorage.setItem(
@@ -705,11 +779,35 @@ export function ConversationWorkspace({
                   {item.label} · {item.default_model}
                 </option>
               ))}
+              <option value="connect">＋ Add API key / model…</option>
             </select>
+            <button
+              className="chat-model-settings"
+              type="button"
+              aria-label="Open models and API keys"
+              onClick={() => setModelsOpen(true)}
+            >
+              ◈ <span>Models & keys</span>
+            </button>
             <QualityRing score={displayedScore} compact />
             <span>Quality</span>
           </div>
         </header>
+        {!connections.length && !loading && (
+          <div className="chat-connect-banner">
+            <span className="connect-banner-mark">✦</span>
+            <div>
+              <strong>Choose the AI behind your prompts</strong>
+              <span>
+                Add your API key and select a model for adaptive questions and
+                prompt generation.
+              </span>
+            </div>
+            <button type="button" onClick={() => setModelsOpen(true)}>
+              Connect AI →
+            </button>
+          </div>
+        )}
 
         <div className="chat-scroll" aria-live="polite">
           {loading ? (
@@ -774,6 +872,15 @@ export function ConversationWorkspace({
                   onSkip={skipCurrentQuestion}
                   onReply={() => replyBox.current?.focus()}
                   busy={Boolean(busy)}
+                  adaptive={Boolean(
+                    analysis?.ai_succeeded &&
+                    analysis.analysis_version === "prompt-analyzer-v3",
+                  )}
+                  onConnect={() => setModelsOpen(true)}
+                  canReassess={Boolean(
+                    connections.length || analysis?.ai_succeeded,
+                  )}
+                  onReassess={() => void reassessCurrentPrompt()}
                 />
               )}
 
@@ -941,6 +1048,42 @@ export function ConversationWorkspace({
           />
         )}
       </aside>
+      {modelsOpen && (
+        <WorkspaceModal title="Models & API keys" onClose={closeModels} wide>
+          {modelsError && (
+            <p className="workflow-alert error" role="alert">
+              {modelsError}
+              <button
+                type="button"
+                onClick={() => {
+                  setModelsError("");
+                  void Promise.all([
+                    refreshConnections(),
+                    getProviderCatalog().then(setCatalog),
+                  ]).catch((caught) =>
+                    setModelsError(
+                      friendlyError(caught, "Could not load model settings."),
+                    ),
+                  );
+                }}
+              >
+                Retry
+              </button>
+            </p>
+          )}
+          <ConnectionVault
+            catalog={catalog}
+            connections={allConnections}
+            canWrite={canWrite}
+            onRefresh={refreshConnections}
+            onConnected={(item) => {
+              setConnectionId(item.id);
+              connectionRef.current = item.id;
+              localStorage.setItem("promptpilot:chat-provider", item.id);
+            }}
+          />
+        </WorkspaceModal>
+      )}
     </div>
   );
 }
@@ -1050,12 +1193,20 @@ function QuestionMessage({
   onSkip,
   onReply,
   busy,
+  adaptive,
+  onConnect,
+  canReassess,
+  onReassess,
 }: {
   session: QuestionSession;
   onChoose: (value: string) => void;
   onSkip: () => void;
   onReply: () => void;
   busy: boolean;
+  adaptive: boolean;
+  onConnect: () => void;
+  canReassess: boolean;
+  onReassess: () => void;
 }) {
   const question = session.next_question!;
   return (
@@ -1063,6 +1214,13 @@ function QuestionMessage({
       <div className="message-avatar">P</div>
       <div className="message-body question-message">
         <strong>One useful question</strong>
+        <span
+          className={`question-source ${adaptive || question.source === "ai" ? "adaptive" : ""}`}
+        >
+          {adaptive || question.source === "ai"
+            ? "Based on your prompt and replies"
+            : "Offline suggestion"}
+        </span>
         <h3>{question.text}</h3>
         {question.options && (
           <div className="answer-options">
@@ -1092,6 +1250,27 @@ function QuestionMessage({
             Skip
           </button>
         </div>
+        {canReassess && !adaptive ? (
+          <button
+            type="button"
+            className="question-connect-link"
+            disabled={busy}
+            onClick={onReassess}
+          >
+            Recheck with selected model ↗
+          </button>
+        ) : (
+          !adaptive &&
+          question.source !== "ai" && (
+            <button
+              className="question-connect-link"
+              type="button"
+              onClick={onConnect}
+            >
+              Connect a model for adaptive questions ↗
+            </button>
+          )
+        )}
       </div>
     </div>
   );

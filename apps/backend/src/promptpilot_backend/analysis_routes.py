@@ -62,7 +62,8 @@ def create_analysis(
         raise HTTPException(status_code=422, detail="Only user messages can be analyzed")
     try:
         analysis = analyze_hybrid(db, project.id, conversation.id, message, mode,
-                                 provider=chat_provider(db, user.id, connection_id))
+                                 provider=chat_provider(db, user.id, connection_id),
+                                 adaptive_clarification=True)
         create_question_session(db, analysis)
         return PromptAnalysisResponse.model_validate(analysis)
     except ProviderError as error:

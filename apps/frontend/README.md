@@ -10,7 +10,11 @@ pnpm --filter @promptpilot/frontend dev
 
 The UI uses cookie-authenticated same-origin `/api/v1` routes. During local development, Next.js proxies them to `http://localhost:8000`; set the server-only `BACKEND_ORIGIN` to change the origin. Production requires an HTTPS origin. Start the backend first and open `http://localhost:3000`.
 
-Refresh and navigation recovery come from persisted backend records. Context previews are assembled on demand. Prompt generation and live target execution show an unavailable state unless the backend has provider credentials; the frontend never accepts or exposes those credentials and never substitutes fake responses. Evaluation is shown only for persisted runs, and a baseline/PromptPilot comparison requires one persisted `succeeded` run of each strategy.
+Refresh and navigation recovery come from persisted backend records. Context previews are assembled on demand. Open **Models & API keys** from chat or the AI team tabs to enter a provider key, load its model catalog, and choose a default model. Keys are submitted through the authenticated same-origin API, encrypted on the backend, cleared from the input after saving, and never returned in API responses. The browser does not call providers directly. Server environment credentials remain a fallback. Evaluation is shown only for persisted runs, and a baseline/PromptPilot comparison requires one persisted `succeeded` run of each strategy.
+
+**AI delivery team → Team models** shows every task’s provider and model assignment. The quick-start control fills unassigned tasks, and each task can use another model from the same key. The node inspector supports **Save and run** to persist edited settings before execution. **Output** and **Runs** show reviewable results and execution history.
+
+With a connected model, clarification follows that model’s task-specific analysis and reconsiders the full saved question/answer history after each reply. Offline questions are labelled explicitly. **Recheck with selected model** upgrades an existing offline session while preserving its replies.
 
 Run frontend checks from the repository root:
 

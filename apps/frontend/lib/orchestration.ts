@@ -147,6 +147,11 @@ export const updateProviderModel = (id: string, defaultModel: string) =>
     method: "PATCH",
     body: JSON.stringify({ default_model: defaultModel }),
   });
+export const updateProviderKey = (id: string, apiKey: string) =>
+  api<ProviderConnection>(`/api/v1/provider-connections/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ api_key: apiKey }),
+  });
 export const disableProvider = (id: string) =>
   api<ProviderConnection>(`/api/v1/provider-connections/${id}/disable`, {
     method: "POST",

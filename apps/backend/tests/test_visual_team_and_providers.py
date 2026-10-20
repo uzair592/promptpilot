@@ -7,10 +7,11 @@ from sqlalchemy import select
 
 from promptpilot_backend.analyzer_service import classify_task
 from promptpilot_backend.db import SessionLocal
-from promptpilot_backend.llm_provider import ProviderUnavailable
+from promptpilot_backend.llm_provider import AIAnalysis, ProviderUnavailable
 from promptpilot_backend.models import ProviderConnection
 from promptpilot_backend.prompt_generation import PromptGenerationResult
 from promptpilot_backend.provider_gateway import ProviderGateway
+from promptpilot_backend.question_generator import GeneratedQuestion
 from promptpilot_backend.workflow_service import PlannedWorkflow
 
 
@@ -377,3 +378,138 @@ def test_missing_model_is_reported_with_available_choices(client, monkeypatch):
     saved = client.get("/api/v1/provider-connections").json()["items"][0]
     assert saved["status"] == "invalid"
     assert saved["available_models"] == ["new-model", "another-model"]
+
+
+def test_connected_model_can_decide_no_clarification_is_needed(client, monkeypatch):
+    _, chat = workspace(client)
+    selected = connection(client)
+    monkeypatch.setattr(
+        ProviderGateway, "analyze",
+        lambda *_: AIAnalysis(task_category="writing", dimensions={}, information_gaps=[]),
+    )
+    monkeypatch.setattr(
+        ProviderGateway, "generate_question", lambda *_: pytest.fail("No question needed")
+    )
+    message = client.post(
+        f"/api/v1/conversations/{chat}/messages",
+        json={"role": "user", "content": "Write a thank-you email"},
+    ).json()
+    analysis = client.post(
+        f"/api/v1/conversations/{chat}/messages/{message['id']}/analysis",
+        params={"connection_id": selected},
+    ).json()
+    assert analysis["ai_succeeded"] is True
+    assert all(gap["status"] == "resolved" for gap in analysis["gaps"])
+    assert client.get(f"/api/v1/conversations/{chat}/questions/next").json()[
+        "next_question"
+    ] is None
+
+
+def test_model_reconsiders_next_question_using_every_saved_reply(client, monkeypatch):
+    _, chat = workspace(client)
+    selected = connection(client)
+    contexts = []
+    generated = []
+    decisions = [
+        ("constraints", "Receipt hardware", "Which receipt printer does your restaurant use?"),
+        ("requirements", "Kitchen handoff", "Should kitchen tickets appear on a screen or print?"),
+    ]
+
+    def analyze(self, content):
+        contexts.append(content)
+        index = len(contexts) - 1
+        gaps = []
+        if index < len(decisions):
+            dimension, title, target = decisions[index]
+            gaps = [{"dimension": dimension, "title": title, "description": title,
+                     "severity": "critical", "importance": "high", "question_target": target}]
+        return AIAnalysis(
+            task_category="software_development", dimensions={}, information_gaps=gaps
+        )
+
+    def question(self, payload):
+        generated.append(payload)
+        return GeneratedQuestion(question_text=payload["gap_target"],
+                                 related_gap=payload["gap_id"], priority=1,
+                                 rationale="A decision specific to this restaurant")
+
+    monkeypatch.setattr(ProviderGateway, "analyze", analyze)
+    monkeypatch.setattr(ProviderGateway, "generate_question", question)
+    message = client.post(f"/api/v1/conversations/{chat}/messages", json={
+        "role": "user", "content": "Build a restaurant POS",
+    }).json()
+    client.post(f"/api/v1/conversations/{chat}/messages/{message['id']}/analysis",
+                params={"connection_id": selected})
+    session = client.get(f"/api/v1/conversations/{chat}/questions/next").json()
+    assert session["next_question"]["text"] == decisions[0][2]
+    replies = ["An 80mm USB thermal printer", "A kitchen display with an audible alert"]
+    for index, reply in enumerate(replies):
+        result = client.post(
+            f"/api/v1/conversations/{chat}/questions/{session['next_question']['id']}/answers",
+            json={"content": reply, "connection_id": selected},
+        )
+        assert result.status_code == 201, result.text
+        session = result.json()
+        assert session["analysis"]["ai_succeeded"] is True
+        if index == 0:
+            assert session["next_question"]["text"] == decisions[1][2]
+    assert session["next_question"] is None
+    assert len(session["answered_questions"]) == 2
+    final_input = json.loads(contexts[-1])
+    assert final_input["original_prompt"] == "Build a restaurant POS"
+    assert [item["answer"] for item in final_input["clarification_answers"]] == replies
+    assert generated[1]["previous_answers"] == replies[:1]
+
+
+def test_api_key_can_be_replaced_without_recreating_connection(client, monkeypatch):
+    workspace(client)
+    selected = connection(client)
+    replacement = "replacement-private-example-key"
+    changed = client.patch(f"/api/v1/provider-connections/{selected}",
+                           json={"api_key": replacement})
+    assert changed.status_code == 200
+    assert changed.json()["status"] == "untested"
+    assert replacement not in changed.text
+    with SessionLocal() as db:
+        saved = db.get(ProviderConnection, UUID(selected))
+        assert saved.encrypted_api_key != replacement
+        assert saved.key_last_four == replacement[-4:]
+    monkeypatch.setattr("promptpilot_backend.orchestration_routes.test_provider_connection",
+                        lambda _: ["example-model"])
+    assert client.post(f"/api/v1/provider-connections/{selected}/test").json()[
+        "connection"
+    ]["status"] == "active"
+    assert len(client.get("/api/v1/provider-connections").json()["items"]) == 1
+
+
+def test_existing_offline_questions_can_be_rechecked_without_losing_replies(client, monkeypatch):
+    _, chat = workspace(client)
+    message = client.post(f"/api/v1/conversations/{chat}/messages", json={
+        "role": "user", "content": "Build a restaurant POS",
+    }).json()
+    root = f"/api/v1/conversations/{chat}"
+    client.post(f"{root}/messages/{message['id']}/analysis?mode=baseline")
+    before = client.get(f"{root}/questions/next").json()
+    reply = "Windows desktop with an 80mm USB printer"
+    answered = client.post(f"{root}/questions/{before['next_question']['id']}/answers",
+                           json={"content": reply}).json()
+    assert answered["answered_questions"][0]["content"] == reply
+    selected = connection(client)
+    captured = []
+
+    def analyze(self, content):
+        captured.append(json.loads(content))
+        return AIAnalysis(task_category="software_development", dimensions={}, information_gaps=[])
+
+    monkeypatch.setattr(ProviderGateway, "analyze", analyze)
+    result = client.post(f"{root}/questions/reassess", params={
+        "message_id": message["id"], "connection_id": selected,
+    })
+    assert result.status_code == 200, result.text
+    session = result.json()
+    assert session["id"] == before["id"]
+    assert session["analysis"]["analysis_version"] == "prompt-analyzer-v3"
+    assert session["analysis"]["ai_succeeded"] is True
+    assert session["next_question"] is None
+    assert session["answered_questions"][0]["content"] == reply
+    assert captured[0]["clarification_answers"][0]["answer"] == reply

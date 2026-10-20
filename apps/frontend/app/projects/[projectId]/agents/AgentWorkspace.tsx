@@ -32,6 +32,7 @@ import { readyWorkflowTasks } from "../../../../lib/workflow-layout";
 import { WorkflowCanvas, roleNames } from "./WorkflowCanvas";
 import { NodeInspector } from "./NodeInspector";
 import { ConnectionVault } from "./ConnectionVault";
+import { TeamAssignments } from "./TeamAssignments";
 import { WorkspaceModal as Modal } from "./WorkspaceModal";
 
 export function AgentWorkspace({
@@ -53,7 +54,9 @@ export function AgentWorkspace({
     [repository, setRepository] = useState<ProjectRepository | null>(null);
   const [planId, setPlanId] = useState(""),
     [selectedId, setSelectedId] = useState<string | null>(null);
-  const [view, setView] = useState<"editor" | "executions">("editor"),
+  const [view, setView] = useState<"editor" | "executions" | "models" | "team">(
+      "editor",
+    ),
     [inspectorTab, setInspectorTab] = useState<"configure" | "output" | "runs">(
       "configure",
     );
@@ -323,8 +326,13 @@ export function AgentWorkspace({
           ))}
         </nav>
         <div className="workflow-sidebar-bottom">
-          <button onClick={() => setDialog("vault")}>
-            ◈ Model Vault <b>{activeConnections.length}</b>
+          <button
+            onClick={() => {
+              setView("models");
+              setSidebarOpen(false);
+            }}
+          >
+            ◈ Models & API keys <b>{activeConnections.length}</b>
           </button>
           <button onClick={() => setDialog("repository")}>
             ⌘ Repository {repository && <i />}
@@ -347,10 +355,16 @@ export function AgentWorkspace({
           </div>
           <div className="workflow-top-actions">
             <button
-              className="workflow-secondary"
-              onClick={() => setDialog("vault")}
+              className={
+                activeConnections.length
+                  ? "workflow-secondary"
+                  : "workflow-primary"
+              }
+              aria-label="Models & API keys"
+              onClick={() => setView("models")}
             >
-              Model Vault <span>{activeConnections.length}</span>
+              {activeConnections.length ? "Models & API keys" : "＋ Connect AI"}{" "}
+              <span>{activeConnections.length}</span>
             </button>
             <button
               className="workflow-secondary"
@@ -360,6 +374,37 @@ export function AgentWorkspace({
             </button>
           </div>
         </header>
+        <nav className="studio-tabs" aria-label="AI team workspace">
+          <button
+            className={view === "editor" ? "selected" : ""}
+            onClick={() => setView("editor")}
+          >
+            ◇ Workflow
+          </button>
+          <button
+            className={view === "models" ? "selected" : ""}
+            onClick={() => setView("models")}
+          >
+            ◈ Models & API keys <b>{activeConnections.length}</b>
+          </button>
+          <button
+            className={view === "team" ? "selected" : ""}
+            onClick={() => {
+              setSelectedId(null);
+              setView("team");
+            }}
+            disabled={!activePlan}
+          >
+            ✦ Team models
+          </button>
+          <button
+            className={view === "executions" ? "selected" : ""}
+            onClick={() => setView("executions")}
+            disabled={!activePlan}
+          >
+            ↗ Executions
+          </button>
+        </nav>
         {(error || notice) && (
           <div
             className={`workflow-alert ${error ? "error" : "success"}`}
@@ -381,9 +426,46 @@ export function AgentWorkspace({
           <div className="workflow-empty">
             <h2>Loading your workspace…</h2>
           </div>
+        ) : view === "models" ? (
+          <div className="models-page">
+            <div className="studio-section-heading">
+              <div>
+                <small>YOUR AI, CONNECTED</small>
+                <h2>Models & API keys</h2>
+                <p>
+                  Add a provider key, choose a model, then use it in chat and
+                  your delivery team.
+                </p>
+              </div>
+              {activePlan && activeConnections.length > 0 && (
+                <button
+                  className="workflow-primary"
+                  onClick={() => {
+                    setSelectedId(null);
+                    setView("team");
+                  }}
+                >
+                  Assign models to agents →
+                </button>
+              )}
+            </div>
+            <ConnectionVault
+              catalog={catalog}
+              connections={connections}
+              canWrite={canWrite}
+              onRefresh={refresh}
+            />
+          </div>
         ) : !activePlan ? (
           <div className="workflow-empty">
-            <span className="workflow-empty-symbol">◇</span>
+            <div className="studio-hero-art" aria-hidden="true">
+              <span className="hero-orbit orbit-one" />
+              <span className="hero-orbit orbit-two" />
+              <span className="hero-ai hero-ai-one">PM</span>
+              <span className="hero-ai hero-ai-two">UI</span>
+              <span className="hero-ai hero-ai-three">QA</span>
+              <span className="hero-center">✦</span>
+            </div>
             <small>YOUR IDEA. YOUR AI TEAM.</small>
             <h2>From a prompt to a project workflow.</h2>
             <p>
@@ -406,10 +488,29 @@ export function AgentWorkspace({
             </button>
             <button
               className="workflow-text-button"
-              onClick={() => setDialog("vault")}
+              onClick={() => setView("models")}
             >
-              Connect a model first ↗
+              {activeConnections.length
+                ? `${activeConnections.length} AI connection${activeConnections.length === 1 ? "" : "s"} ready · manage models`
+                : "First time? Add your API key and choose a model →"}
             </button>
+            <div className="studio-start-steps">
+              <button onClick={() => setView("models")}>
+                <b>1</b>
+                <strong>Connect your AI</strong>
+                <small>Paste an API key, choose a model</small>
+              </button>
+              <button onClick={newPlan} disabled={!canWrite}>
+                <b>2</b>
+                <strong>Describe your project</strong>
+                <small>Turn your idea into a workflow</small>
+              </button>
+              <div>
+                <b>3</b>
+                <strong>Assign, run, review</strong>
+                <small>Give each agent a model</small>
+              </div>
+            </div>
           </div>
         ) : (
           <>
@@ -422,20 +523,23 @@ export function AgentWorkspace({
                     : "Editable template"}
                 </span>
               </div>
-              <nav aria-label="Workspace view">
-                <button
-                  className={view === "editor" ? "selected" : ""}
-                  onClick={() => setView("editor")}
-                >
-                  Editor
-                </button>
-                <button
-                  className={view === "executions" ? "selected" : ""}
-                  onClick={() => setView("executions")}
-                >
-                  Executions
-                </button>
-              </nav>
+              <button
+                className="workflow-secondary"
+                onClick={() => {
+                  setSelectedId(null);
+                  setView("team");
+                }}
+              >
+                Assign models{" "}
+                <span>
+                  {tasks.filter(
+                    (task) =>
+                      !activeConnections.some(
+                        (item) => item.id === task.assigned_connection_id,
+                      ),
+                  ).length || "✓"}
+                </span>
+              </button>
               <button
                 className="workflow-primary run-workflow"
                 onClick={runReady}
@@ -446,164 +550,277 @@ export function AgentWorkspace({
                   : `▶ Run ready nodes${ready.length ? ` (${ready.length})` : ""}`}
               </button>
             </div>
-            <div className="workflow-phase-strip">
-              {activePlan.milestones.map((phase) => (
-                <span key={phase.id}>
-                  <b>{phase.position}</b>
-                  {phase.title}
-                </span>
-              ))}
-            </div>
-            <div className="workflow-workarea">
-              <div className="workflow-editor-surface">
-                {view === "editor" ? (
-                  <>
-                    <div className="workflow-canvas-toolbar">
-                      <span>
-                        <i className="connection-dot" />
-                        {
-                          tasks.filter((task) => task.status === "completed")
-                            .length
-                        }
-                        /{tasks.length} approved ·{" "}
-                        {
-                          tasks.filter((task) => task.status === "review")
-                            .length
-                        }{" "}
-                        awaiting review
-                      </span>
-                      <div>
-                        <button
-                          onClick={() => setLayoutVersion((value) => value + 1)}
-                        >
-                          Auto arrange
-                        </button>
-                        <button
-                          onClick={() => setDialog("node")}
-                          disabled={!canWrite || Boolean(busy)}
-                        >
-                          ＋ Add node
-                        </button>
-                      </div>
-                    </div>
-                    <WorkflowCanvas
-                      planId={activePlan.id}
-                      tasks={tasks}
-                      title={activePlan.title}
-                      selectedId={selectedId}
-                      onSelect={(id) => select(id)}
-                      layoutVersion={layoutVersion}
-                    />
-                  </>
-                ) : (
-                  <div className="workflow-executions">
-                    <h2>Execution overview</h2>
-                    <p>
-                      Inspect a node to see every attempt, provider response,
-                      and review note.
-                    </p>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Task</th>
-                          <th>Model</th>
-                          <th>State</th>
-                          <th>Attempts</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tasks.map((task) => (
-                          <tr key={task.id}>
-                            <td>
-                              <strong>{task.title}</strong>
-                              <small>{roleNames[task.role]}</small>
-                            </td>
-                            <td>{task.assigned_model || "Unassigned"}</td>
-                            <td>
-                              <span
-                                className={`execution-state state-${task.status}`}
-                              >
-                                {task.status}
-                              </span>
-                            </td>
-                            <td>{task.attempt_count}</td>
-                            <td>
-                              <button onClick={() => select(task.id, "runs")}>
-                                Inspect runs ↗
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+            {view === "editor" &&
+              tasks.some(
+                (task) =>
+                  !activeConnections.some(
+                    (item) => item.id === task.assigned_connection_id,
+                  ),
+              ) && (
+                <div className="workflow-setup-nudge">
+                  <span>✦</span>
+                  <div>
+                    <strong>
+                      {activeConnections.length
+                        ? "Choose which model runs each task"
+                        : "Your workflow needs an AI connection"}
+                    </strong>
+                    <small>
+                      {activeConnections.length
+                        ? "Open Team models to assign your connected providers, then run the ready nodes."
+                        : "Add an API key and model, then assign it to your agents. You can use one key for the whole team."}
+                    </small>
                   </div>
-                )}
-              </div>
-              {selected && (
-                <NodeInspector
-                  key={`${selected.id}:${inspectorTab}`}
-                  task={selected}
-                  tasks={tasks}
-                  connections={connections}
-                  busy={Boolean(busy)}
-                  canWrite={canWrite}
-                  canPublish={canManageRepository}
-                  hasRepository={Boolean(repository)}
-                  initialTab={inspectorTab}
-                  onClose={() => setSelectedId(null)}
-                  onSave={(patch) =>
-                    act("save-node", async () => {
-                      await updateAgentTask(selected.id, patch);
-                      setNotice(
-                        patch.status === "completed"
-                          ? "Output approved."
-                          : "Node saved.",
-                      );
-                    })
-                  }
-                  onRun={() =>
-                    void act(`run-${selected.id}`, async () => {
-                      await runAgentTask(selected.id);
-                      setInspectorTab("output");
-                      setNotice(
-                        "Node finished. Review its output before approving.",
-                      );
-                    })
-                  }
-                  onDelete={() => {
-                    if (
-                      window.confirm(
-                        `Remove “${selected.title}”? Its run history will be deleted.`,
-                      )
-                    )
-                      void act("remove-node", async () => {
-                        await deleteAgentTask(selected.id);
-                        setSelectedId(null);
-                      });
-                  }}
-                  onSaveDraft={(text) =>
-                    void act("save-draft", async () => {
-                      await saveAgentDraft(selected.id, text);
-                      setNotice("Reviewed draft saved.");
-                    })
-                  }
-                  onPublish={() =>
-                    void act("publish", async () => {
-                      const result = await publishAgentTask(selected.id);
-                      setNotice(
-                        `Draft pull request created: ${result.pull_request_url}`,
-                      );
-                    })
-                  }
-                />
+                  <button
+                    className="workflow-secondary"
+                    onClick={() => {
+                      setSelectedId(null);
+                      setView(activeConnections.length ? "team" : "models");
+                    }}
+                  >
+                    {activeConnections.length
+                      ? "Assign team models →"
+                      : "Connect AI →"}
+                  </button>
+                </div>
               )}
-            </div>
+            {view === "team" ? (
+              <TeamAssignments
+                tasks={tasks}
+                connections={connections}
+                disabled={!canWrite || Boolean(busy)}
+                onConnect={() => setView("models")}
+                onInspect={(id) => {
+                  setView("editor");
+                  select(id);
+                }}
+                onSave={(task, id, model) =>
+                  act("assign-node", async () => {
+                    await updateAgentTask(task.id, {
+                      assigned_connection_id: id,
+                      assigned_model: model,
+                    });
+                    setNotice(`Model assigned to ${task.title}.`);
+                  })
+                }
+                onAssignUnassigned={(id, model) =>
+                  act("assign-team", async () => {
+                    const targets = tasks.filter(
+                      (task) =>
+                        !activeConnections.some(
+                          (item) => item.id === task.assigned_connection_id,
+                        ) &&
+                        !["running", "completed", "cancelled"].includes(
+                          task.status,
+                        ),
+                    );
+                    const results = await Promise.allSettled(
+                      targets.map((task) =>
+                        updateAgentTask(task.id, {
+                          assigned_connection_id: id,
+                          assigned_model: model,
+                        }),
+                      ),
+                    );
+                    const failures = results.filter(
+                      (result) => result.status === "rejected",
+                    );
+                    if (failures.length)
+                      throw new Error(
+                        `${results.length - failures.length} of ${results.length} assignments saved. Retry the remaining unassigned tasks.`,
+                      );
+                    setNotice(
+                      `Assigned ${model} to ${results.length} tasks. Open Workflow to run ready nodes.`,
+                    );
+                  })
+                }
+              />
+            ) : (
+              <>
+                <div className="workflow-phase-strip">
+                  {activePlan.milestones.map((phase) => (
+                    <span key={phase.id}>
+                      <b>{phase.position}</b>
+                      {phase.title}
+                    </span>
+                  ))}
+                </div>
+                <div className="workflow-workarea">
+                  <div className="workflow-editor-surface">
+                    {view === "editor" ? (
+                      <>
+                        <div className="workflow-canvas-toolbar">
+                          <span>
+                            <i className="connection-dot" />
+                            {
+                              tasks.filter(
+                                (task) => task.status === "completed",
+                              ).length
+                            }
+                            /{tasks.length} approved ·{" "}
+                            {
+                              tasks.filter((task) => task.status === "review")
+                                .length
+                            }{" "}
+                            awaiting review
+                          </span>
+                          <div>
+                            <button
+                              onClick={() => {
+                                setSelectedId(null);
+                                setView("team");
+                              }}
+                            >
+                              Assign models
+                            </button>
+                            <button
+                              onClick={() =>
+                                setLayoutVersion((value) => value + 1)
+                              }
+                            >
+                              Auto arrange
+                            </button>
+                            <button
+                              onClick={() => setDialog("node")}
+                              disabled={!canWrite || Boolean(busy)}
+                            >
+                              ＋ Add node
+                            </button>
+                          </div>
+                        </div>
+                        <WorkflowCanvas
+                          planId={activePlan.id}
+                          tasks={tasks}
+                          title={activePlan.title}
+                          selectedId={selectedId}
+                          onSelect={(id) => select(id)}
+                          layoutVersion={layoutVersion}
+                        />
+                      </>
+                    ) : (
+                      <div className="workflow-executions">
+                        <h2>Execution overview</h2>
+                        <p>
+                          Inspect a node to see every attempt, provider
+                          response, and review note.
+                        </p>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Task</th>
+                              <th>Model</th>
+                              <th>State</th>
+                              <th>Attempts</th>
+                              <th />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tasks.map((task) => (
+                              <tr key={task.id}>
+                                <td>
+                                  <strong>{task.title}</strong>
+                                  <small>{roleNames[task.role]}</small>
+                                </td>
+                                <td>{task.assigned_model || "Unassigned"}</td>
+                                <td>
+                                  <span
+                                    className={`execution-state state-${task.status}`}
+                                  >
+                                    {task.status}
+                                  </span>
+                                </td>
+                                <td>{task.attempt_count}</td>
+                                <td>
+                                  <button
+                                    onClick={() => select(task.id, "runs")}
+                                  >
+                                    Inspect runs ↗
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                  {selected && (
+                    <NodeInspector
+                      key={`${selected.id}:${inspectorTab}`}
+                      task={selected}
+                      tasks={tasks}
+                      connections={connections}
+                      busy={Boolean(busy)}
+                      canWrite={canWrite}
+                      canPublish={canManageRepository}
+                      hasRepository={Boolean(repository)}
+                      onConnect={() => setDialog("vault")}
+                      initialTab={inspectorTab}
+                      onClose={() => setSelectedId(null)}
+                      onSave={(patch) =>
+                        act("save-node", async () => {
+                          await updateAgentTask(selected.id, patch);
+                          setNotice(
+                            patch.status === "completed"
+                              ? "Output approved."
+                              : "Node saved.",
+                          );
+                        })
+                      }
+                      onRun={() =>
+                        void act(`run-${selected.id}`, async () => {
+                          await runAgentTask(selected.id);
+                          setInspectorTab("output");
+                          setNotice(
+                            "Node finished. Review its output before approving.",
+                          );
+                        })
+                      }
+                      onSaveAndRun={(patch) =>
+                        act(`run-${selected.id}`, async () => {
+                          await updateAgentTask(selected.id, patch);
+                          await runAgentTask(selected.id);
+                          setInspectorTab("output");
+                          setNotice(
+                            "Node finished. Review its output before approving.",
+                          );
+                        })
+                      }
+                      onDelete={() => {
+                        if (
+                          window.confirm(
+                            `Remove “${selected.title}”? Its run history will be deleted.`,
+                          )
+                        )
+                          void act("remove-node", async () => {
+                            await deleteAgentTask(selected.id);
+                            setSelectedId(null);
+                          });
+                      }}
+                      onSaveDraft={(text) =>
+                        void act("save-draft", async () => {
+                          await saveAgentDraft(selected.id, text);
+                          setNotice("Reviewed draft saved.");
+                        })
+                      }
+                      onPublish={() =>
+                        void act("publish", async () => {
+                          const result = await publishAgentTask(selected.id);
+                          setNotice(
+                            `Draft pull request created: ${result.pull_request_url}`,
+                          );
+                        })
+                      }
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </>
         )}
       </section>
       {dialog === "vault" && (
-        <Modal title="Model Vault" onClose={closeDialog} wide>
+        <Modal title="Models & API keys" onClose={closeDialog} wide>
           <ConnectionVault
             catalog={catalog}
             connections={connections}
@@ -716,6 +933,25 @@ export function AgentWorkspace({
                 ))}
               </select>
             </label>
+            {!activeConnections.length && (
+              <div className="plan-connect-tip">
+                <strong>Want a plan written for your idea?</strong>
+                <p>
+                  Connect a model first. You can also explore an editable
+                  template without a key.
+                </p>
+                <button
+                  type="button"
+                  className="workflow-secondary"
+                  onClick={() => {
+                    setDialog(null);
+                    setView("models");
+                  }}
+                >
+                  ＋ Add API key and model
+                </button>
+              </div>
+            )}
             <label>
               Optional start time
               <input
